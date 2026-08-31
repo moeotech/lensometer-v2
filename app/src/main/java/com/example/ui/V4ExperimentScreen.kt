@@ -388,6 +388,7 @@ fun V4ResultDialog(result: V4Result, onDismiss: () -> Unit) {
                         appendLine("")
                         appendLine("--- RUN ${index + 1} ---")
                         appendLine("Success: ${run.success}")
+                        appendLine("Error: ${run.errorMessage}")
                         if (run.success) {
                             appendLine("Lambda1: ${run.lambda1}")
                             appendLine("Lambda2: ${run.lambda2}")
@@ -397,12 +398,64 @@ fun V4ResultDialog(result: V4Result, onDismiss: () -> Unit) {
                             appendLine("SPH EXP: ${rp?.sphere ?: "N/A"}")
                             appendLine("CYL EXP: ${rp?.cylinder ?: "N/A"}")
                             appendLine("AXIS EXP: ${rp?.axis ?: "N/A"}")
-                            appendLine("Matches: ${run.trackedDots}")
-                            appendLine("Reg RMS: ${run.registrationRms}")
-                            appendLine("Fit RMS: ${run.fieldFitRms}")
-                            appendLine("Coverage Pct: ${run.spatialCoveragePct}")
-                        } else {
-                            appendLine("Error: ${run.errorMessage}")
+                        }
+
+                        appendLine("")
+                        appendLine("--- DETECTION ---")
+                        appendLine("Total Reference Dots: ${run.totalReferenceDots}")
+                        appendLine("Total Lens Dots: ${run.totalLensDots}")
+
+                        appendLine("")
+                        appendLine("--- TOPOLOGY ---")
+                        appendLine("Topology Input Reference: ${run.topologyInputReferenceDots}")
+                        appendLine("Topology Input Lens: ${run.topologyInputLensDots}")
+                        appendLine("Topology Assigned Reference: ${run.topologyAssignedReferenceDots}")
+                        appendLine("Topology Assigned Lens: ${run.topologyAssignedLensDots}")
+                        appendLine("Topology Unassigned Reference: ${run.topologyUnassignedReferenceDots}")
+                        appendLine("Topology Unassigned Lens: ${run.topologyUnassignedLensDots}")
+                        appendLine("Topology Collisions Reference: ${run.topologyCollisionsReference}")
+                        appendLine("Topology Collisions Lens: ${run.topologyCollisionsLens}")
+                        appendLine("Topology Consistency Errors Reference: ${run.topologyConsistencyErrorsReference}")
+                        appendLine("Topology Consistency Errors Lens: ${run.topologyConsistencyErrorsLens}")
+
+                        appendLine("")
+                        appendLine("--- MATCHING FUNNEL ---")
+                        appendLine("Seed Reference Candidates: ${run.seedReferenceCandidates}")
+                        appendLine("Seed Lens Candidates: ${run.seedLensCandidates}")
+                        appendLine("Mutual NN Matches: ${run.mutualNearestNeighborMatches}")
+                        appendLine("Rejected Distance: ${run.rejectedByDistance}")
+                        appendLine("Rejected Non-Mutual: ${run.rejectedByNonMutual}")
+                        appendLine("Rejected Topology: ${run.rejectedByTopology}")
+                        appendLine("Rejected Duplicate: ${run.rejectedByDuplicateAssignment}")
+                        appendLine("Rejected Geometric: ${run.rejectedByGeometricConsistency}")
+                        appendLine("Neighbor Expanded: ${run.neighborExpandedMatches}")
+                        appendLine("Affine Expanded: ${run.affineExpandedMatches}")
+                        appendLine("FINAL ONE-TO-ONE MATCHES: ${run.finalOneToOneMatches}")
+
+                        appendLine("")
+                        appendLine("--- SPATIAL DISTRIBUTION ---")
+                        appendLine("Q1: ${run.q1Matches}")
+                        appendLine("Q2: ${run.q2Matches}")
+                        appendLine("Q3: ${run.q3Matches}")
+                        appendLine("Q4: ${run.q4Matches}")
+                        appendLine("Quadrants Covered: ${run.quadrantCoverage}")
+                        appendLine("Spatial Coverage %: ${run.spatialCoveragePct}")
+
+                        appendLine("")
+                        appendLine("--- REGISTRATION ---")
+                        appendLine("Registration Features: ${run.registrationFeatureCount}")
+                        appendLine("Registration Inliers: ${run.registrationInliers}")
+                        appendLine("Registration Model: ${run.registrationModel}")
+                        appendLine("Registration RMS: ${run.registrationRms}")
+                        appendLine("Registration Tx: ${run.registrationTx}")
+                        appendLine("Registration Ty: ${run.registrationTy}")
+                        appendLine("Registration Rotation: ${run.registrationRotationDeg}")
+                        appendLine("Registration Scale: ${run.registrationScale}")
+
+                        appendLine("")
+                        appendLine("--- EXISTING REJECTION MAP ---")
+                        run.matchRejections.forEach { (key, value) ->
+                            appendLine("$key: $value")
                         }
                     }
                 }
