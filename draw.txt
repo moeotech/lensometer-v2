@@ -1,0 +1,101 @@
+        val lambda2Std = sqrt(results.map { (it.lambda2 - lambda2Mean) * (it.lambda2 - lambda2Mean) }.average())
+        val isotropicStd = sqrt(results.map { (it.isotropic - isotropicMean) * (it.isotropic - isotropicMean) }.average())
+        val anisotropicStd = sqrt(results.map { (it.anisotropic - anisotropicMean) * (it.anisotropic - anisotropicMean) }.average())
+
+        val cvThreshold = 0.30
+        val minSignal = 0.05
+        
+        fun checkCv(mean: Double, std: Double, name: String): String? {
+            if (Math.abs(mean) > minSignal) {
+                val cv = std / Math.abs(mean)
+                if (cv > cvThreshold) return "$name CV=${String.format("%.2f", cv)}"
+            }
+            return null
+        }
+        
+        val fails = listOfNotNull(
+            checkCv(lambda1Mean, lambda1Std, "L1"),
+            checkCv(lambda2Mean, lambda2Std, "L2"),
+            checkCv(isotropicMean, isotropicStd, "ISO"),
+            checkCv(anisotropicMean, anisotropicStd, "ANISO")
+        )
+        
+        val l1_vals = results.map { it.lambda1 }.sorted()
+        val spreadFails = l1_vals.last() - l1_vals.first() > 0.15
+        
+        if (fails.isNotEmpty() || spreadFails) {
+            val reason = if (fails.isNotEmpty()) fails.joinToString(", ") else "Lambda1 spread > 0.15"
+            return@withContext V4Result(success = false, errorMessage = "OPTICAL REPEATABILITY: FAILED ($reason)", allRuns = results, lastRunResult = results.last())
+        }
+
+        var axisDisplay = "UNRELIABLE"
+
+        var axisMean = 0.0
+        if (anisotropicMean > 0.02) {
+            var sinSum = 0.0
+            var cosSum = 0.0
+            for (r in results) {
+                val rad = r.axis * 2.0 * Math.PI / 180.0
+                sinSum += sin(rad)
+                cosSum += cos(rad)
+            }
+            axisMean = atan2(sinSum / results.size, cosSum / results.size) * 180.0 / (2.0 * Math.PI)
+            if (axisMean < 0) axisMean += 180.0
+            if (axisMean >= 180.0) axisMean -= 180.0
+            axisDisplay = String.format("%.0f° SIGNAL", axisMean)
+        }
+        
+        val lastRun = results.last()
+        val visualVectorMap = if (lastRun.referencePoints.isNotEmpty()) { 
+             drawVectorMapInternal(lastRun, 1f)
+        } else null
+        
+        return@withContext V4Result(
+            success = true,
+            sphDisplay = "NOT CALIBRATED",
+            cylDisplay = "NOT CALIBRATED",
+            axisDisplay = axisDisplay,
+            lambda1 = lambda1Mean,
+            lambda2 = lambda2Mean,
+            isotropic = isotropicMean,
+            anisotropic = anisotropicMean,
+            lambda1Std = lambda1Std,
+            lambda2Std = lambda2Std,
+            isotropicStd = isotropicStd,
+            anisotropicStd = anisotropicStd,
+            allRuns = results,
+            trackedDots = lastRun.trackedDots,
+            registrationRms = lastRun.registrationRms,
+            registrationInliers = lastRun.registrationInliers,
+            fieldFitRms = lastRun.fieldFitRms,
+            refDotCount = lastRun.refDotCount,
+            lensDotCount = lastRun.lensDotCount,
+            meanDx = lastRun.meanDx,
+            meanDy = lastRun.meanDy,
+            visualVectorMap = visualVectorMap,
+            lastRunResult = lastRun
+        )
+    }
+    
+    fun drawVectorMap(result: V4Result, mag: Float): Bitmap? {
+        if (result.lastRunResult == null) return null
+        return drawVectorMapInternal(result.lastRunResult, mag)
+    }
+    
+    private fun drawVectorMapInternal(run: V4RunResult, mag: Float): Bitmap {
+        if (run.refWidth <= 0 || run.refHeight <= 0) {
+            return Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+        }
+        val bitmap = Bitmap.createBitmap(run.refWidth, run.refHeight, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(Color.BLACK)
+        
+        val paintRef = Paint().apply { color = Color.RED; style = Paint.Style.FILL; isAntiAlias = true }
+        val paintLens = Paint().apply { color = Color.GREEN; style = Paint.Style.FILL; isAntiAlias = true }
+        val paintArrow = Paint().apply { color = Color.YELLOW; strokeWidth = 2f; style = Paint.Style.STROKE; isAntiAlias = true }
+        
+        val sizeRef = run.referencePoints.size
+        val sizeLens = run.observedPoints.size
+        val limit = min(sizeRef, sizeLens)
+        
+        val paintRejRef = Paint().apply { color = Color.argb(100, 255, 0, 0); style = Paint.Style.FILL; isAntiAlias = true }

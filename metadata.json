@@ -1,0 +1,7 @@
+{
+  "name": "Optical Experiment V1",
+  "description": "A scientific prototype to test optical changes using smartphone camera and flash.",
+  "requestFramePermissions": ["CAMERA"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+

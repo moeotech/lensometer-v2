@@ -1,0 +1,155 @@
+Reusing configuration cache.
+> Task :app:preBuild UP-TO-DATE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:generateDebugBuildConfig UP-TO-DATE
+> Task :app:processDebugGoogleServices UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:javaPreCompileDebug UP-TO-DATE
+> Task :app:mapDebugSourceSetPaths UP-TO-DATE
+> Task :app:kspDebugKotlin UP-TO-DATE
+> Task :app:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :app:mergeDebugResources UP-TO-DATE
+> Task :app:preDebugUnitTestBuild UP-TO-DATE
+> Task :app:processDebugMainManifest UP-TO-DATE
+> Task :app:checkDebugAarMetadata UP-TO-DATE
+> Task :app:processDebugManifest UP-TO-DATE
+> Task :app:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :app:processDebugManifestForPackage UP-TO-DATE
+> Task :app:mergeDebugAssets UP-TO-DATE
+> Task :app:processDebugUnitTestManifest UP-TO-DATE
+> Task :app:processDebugNavigationResources UP-TO-DATE
+> Task :app:compileDebugNavigationResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:generateDebugRFile UP-TO-DATE
+> Task :app:compileDebugKotlin UP-TO-DATE
+> Task :app:processDebugJavaRes UP-TO-DATE
+> Task :app:processDebugResources UP-TO-DATE
+> Task :app:compileDebugJavaWithJavac UP-TO-DATE
+> Task :app:packageDebugUnitTestForUnitTest UP-TO-DATE
+> Task :app:bundleDebugClassesToCompileJar UP-TO-DATE
+> Task :app:generateDebugUnitTestConfig UP-TO-DATE
+> Task :app:bundleDebugClassesToRuntimeJar UP-TO-DATE
+> Task :app:kspDebugUnitTestKotlin
+> Task :app:compileDebugUnitTestKotlin
+> Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:processDebugUnitTestJavaRes UP-TO-DATE
+
+> Task :app:testDebugUnitTest
+
+V4OpticalAnalyzerTest > testD_anisotropicScalingSurvives FAILED
+    java.lang.UnsatisfiedLinkError at V4OpticalAnalyzerTest.kt:115
+
+V4OpticalAnalyzerTest > testP_robustness_grossLongVectorRejected FAILED
+    java.lang.UnsatisfiedLinkError at V4OpticalAnalyzerTest.kt:387
+
+V4OpticalAnalyzerTest > testM_robustness_zeroPower FAILED
+    java.lang.UnsatisfiedLinkError at V4OpticalAnalyzerTest.kt:322
+
+V4OpticalAnalyzerTest > testAE_matching_radialDistortion FAILED
+    java.lang.UnsatisfiedLinkError at Mat.java:-2
+        Caused by: java.lang.UnsatisfiedLinkError at Mat.java:-2
+
+V4OpticalAnalyzerTest > testA_pureTranslationRemoved FAILED
+    java.lang.UnsatisfiedLinkError at V4OpticalAnalyzerTest.kt:42
+
+V4OpticalAnalyzerTest > testAF_matching_missingAndFalseDots FAILED
+    java.lang.UnsatisfiedLinkError at Mat.java:-2
+        Caused by: java.lang.UnsatisfiedLinkError at Mat.java:-2
+
+V4OpticalAnalyzerTest > testAC_matching_perfectGrid FAILED
+    java.lang.UnsatisfiedLinkError at Mat.java:-2
+        Caused by: java.lang.UnsatisfiedLinkError at Mat.java:-2
+
+V4OpticalAnalyzerTest > testQ_pairedIntegrity FAILED
+    java.lang.UnsatisfiedLinkError at V4OpticalAnalyzerTest.kt:399
+
+V4OpticalAnalyzerTest > testY_robustTensor_translatedSphere FAILED
+    java.lang.UnsatisfiedLinkError at V4OpticalAnalyzerTest.kt:590
+
+V4OpticalAnalyzerTest > testV_robustTensor_pureSphere FAILED
+    java.lang.UnsatisfiedLinkError at V4OpticalAnalyzerTest.kt:526
+
+V4OpticalAnalyzerTest > testJ_robustness_smoothRadial FAILED
+    java.lang.UnsatisfiedLinkError at V4OpticalAnalyzerTest.kt:251
+
+V4OpticalAnalyzerTest > testI_repeatabilityFailsOnHighRelativeVariation FAILED
+    java.lang.AssertionError at V4OpticalAnalyzerTest.kt:226
+
+V4OpticalAnalyzerTest > testAA_robustTensor_sphereWith10PctOutliers FAILED
+    java.lang.UnsatisfiedLinkError at V4OpticalAnalyzerTest.kt:651
+
+V4OpticalAnalyzerTest > testW_robustTensor_pureCylinder FAILED
+    java.lang.UnsatisfiedLinkError at V4OpticalAnalyzerTest.kt:547
+
+V4OpticalAnalyzerTest > testG_rotationAndAnisotropicScaling FAILED
+    java.lang.UnsatisfiedLinkError at V4OpticalAnalyzerTest.kt:209
+
+V4OpticalAnalyzerTest > testR_motionCorrection_pureTranslation FAILED
+    java.lang.UnsatisfiedLinkError at V4OpticalAnalyzerTest.kt:413
+
+V4OpticalAnalyzerTest > testK_robustness_smoothAnisotropic FAILED
+    java.lang.UnsatisfiedLinkError at V4OpticalAnalyzerTest.kt:272
+
+V4OpticalAnalyzerTest > testC_isotropicScalingSurvives FAILED
+    java.lang.UnsatisfiedLinkError at V4OpticalAnalyzerTest.kt:92
+
+V4OpticalAnalyzerTest > testZ_robustTensor_rotatedCylinder FAILED
+    java.lang.UnsatisfiedLinkError at V4OpticalAnalyzerTest.kt:623
+
+V4OpticalAnalyzerTest > testL_robustness_corruptedCorrespondences FAILED
+    java.lang.UnsatisfiedLinkError at V4OpticalAnalyzerTest.kt:294
+
+V4OpticalAnalyzerTest > testF_rotationAndIsotropicScaling FAILED
+    java.lang.UnsatisfiedLinkError at V4OpticalAnalyzerTest.kt:174
+
+V4OpticalAnalyzerTest > testS_motionCorrection_pureRadial FAILED
+    java.lang.UnsatisfiedLinkError at V4OpticalAnalyzerTest.kt:439
+
+V4OpticalAnalyzerTest > testU_motionCorrection_anisotropic FAILED
+    java.lang.UnsatisfiedLinkError at V4OpticalAnalyzerTest.kt:504
+
+V4OpticalAnalyzerTest > testAB_robustTensor_cylinderWith10PctOutliers FAILED
+    java.lang.UnsatisfiedLinkError at V4OpticalAnalyzerTest.kt:676
+
+V4OpticalAnalyzerTest > testX_robustTensor_spherePlusCylinder FAILED
+    java.lang.UnsatisfiedLinkError at V4OpticalAnalyzerTest.kt:570
+
+V4OpticalAnalyzerTest > testAD_matching_translatedGrid FAILED
+    java.lang.UnsatisfiedLinkError at Mat.java:-2
+        Caused by: java.lang.UnsatisfiedLinkError at Mat.java:-2
+
+V4OpticalAnalyzerTest > testT_motionCorrection_translationAndRadial FAILED
+    java.lang.UnsatisfiedLinkError at V4OpticalAnalyzerTest.kt:466
+
+V4OpticalAnalyzerTest > testO_repeatabilityGateUnstable FAILED
+    java.lang.UnsatisfiedLinkError at V4OpticalAnalyzerTest.kt:354
+
+V4OpticalAnalyzerTest > testE_shearSurvives FAILED
+    java.lang.UnsatisfiedLinkError at V4OpticalAnalyzerTest.kt:138
+
+V4OpticalAnalyzerTest > testB_pureRotationRemoved FAILED
+    java.lang.UnsatisfiedLinkError at V4OpticalAnalyzerTest.kt:68
+
+V4OpticalAnalyzerTest > testN_robustness_cameraTranslationRotation FAILED
+    java.lang.UnsatisfiedLinkError at V4OpticalAnalyzerTest.kt:345
+
+42 tests completed, 31 failed
+
+> Task :app:testDebugUnitTest FAILED
+> Task :app:finalizeTestRoborazziDebug SKIPPED
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:testDebugUnitTest'.
+> There were failing tests. See the report at: file:///app/applet/app/build/reports/tests/testDebugUnitTest/index.html
+
+* Try:
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+
+BUILD FAILED in 39s
+33 actionable tasks: 3 executed, 30 up-to-date
+Configuration cache entry reused.

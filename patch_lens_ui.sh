@@ -1,0 +1,1 @@
+sed -i 's/import kotlin.math.\*/import kotlin.math.\*\nimport androidx.compose.ui.graphics.drawscope.withTransform\nimport androidx.compose.ui.graphics.PathFillType/g' app/src/main/java/com/example/ui/LensExperimentScreen.kt
