@@ -41,6 +41,8 @@ import androidx.core.content.ContextCompat
 import com.example.analysis.V4OpticalAnalyzer
 import com.example.analysis.V4Result
 import com.example.analysis.V4RunResult
+import com.example.analysis.v5.V5DeflectometryAnalyzer
+import com.example.analysis.v5.V5MatchResult
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.concurrent.Executors
@@ -334,16 +336,28 @@ fun V4ExperimentScreen() {
         }
     }
     if (currentStep == V4Step.COMPLETE && overallResult != null) {
-        V4ResultDialog(result = overallResult!!) {
+        V4ResultDialog(result = overallResult!!, noLensFrames = noLensFrames, withLensFrames = withLensFrames) {
             // Close dialog not needed, it sits on top. We can just wait for restart.
         }
     }
 }
 
 @Composable
-fun V4ResultDialog(result: V4Result, onDismiss: () -> Unit) {
+fun V4ResultDialog(result: V4Result, noLensFrames: List<Bitmap>, withLensFrames: List<Bitmap>, onDismiss: () -> Unit) {
     val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
     val context = androidx.compose.ui.platform.LocalContext.current
+
+    var v5Result by remember { mutableStateOf<V5MatchResult?>(null) }
+    var isV5Analyzing by remember { mutableStateOf(true) }
+
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            val res = V5DeflectometryAnalyzer.analyze(noLensFrames, withLensFrames)
+            v5Result = res
+            isV5Analyzing = false
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -352,12 +366,96 @@ fun V4ResultDialog(result: V4Result, onDismiss: () -> Unit) {
             .verticalScroll(rememberScrollState())
     ) {
         Column {
-            Text("V4 DIRECT LENS RESULT", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text("V4 vs V5 COMPARATIVE EXPERIMENT RESULT", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
 
             Button(onClick = { onDismiss() }, modifier = Modifier.fillMaxWidth()) {
                 Text("CLOSE")
             }
             Spacer(modifier = Modifier.height(8.dp))
+
+            // --- V5 SECTION ---
+            Text("--- V5 GEOMETRIC CORRESPONDENCE ENGINE ---", color = Color.Yellow, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            if (isV5Analyzing) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                Text("Running V5 geometric correspondence...", color = Color.Cyan)
+            } else if (v5Result != null) {
+                val v5 = v5Result!!
+                val tel = v5.telemetry
+                Text("V5 Status: ${if (v5.success) "SUCCESS" else "FAILED"}", color = if (v5.success) Color.Green else Color.Red)
+                Text("Reference Points: ${tel.referencePointCount} | Lens Points: ${tel.lensPointCount}", color = Color.LightGray)
+                Text("Candidate Pairs: ${tel.candidatePairCount} | Seed Matches: ${tel.seedMatchCount}", color = Color.LightGray)
+                Text("MNN Accepted: ${tel.mnnAcceptedCount} (Rejected Dist: ${tel.mnnRejectedDistance}, Non-Mutual: ${tel.mnnRejectedNonMutual})", color = Color.LightGray)
+                Text("Final Accepted Matches: ${v5.correspondences.size}", color = Color.Green, fontWeight = FontWeight.Bold)
+                Text("Quadrants Covered: ${tel.quadrantsCovered} (Q1: ${tel.q1Matches}, Q2: ${tel.q2Matches}, Q3: ${tel.q3Matches}, Q4: ${tel.q4Matches})", color = Color.LightGray)
+                Text("Spatial Coverage: ${String.format("%.1f", tel.coveragePct)}%", color = Color.LightGray)
+                Text("Prediction Transform: Tx=${String.format("%.1f", tel.predictionTx)}, Ty=${String.format("%.1f", tel.predictionTy)}, Rot=${String.format("%.1f", tel.predictionRotationDeg)}°, Scale=${String.format("%.3f", tel.predictionScale)}, RMS=${String.format("%.2f", tel.predictionRms)}", color = Color.LightGray)
+
+                if (v5.rawFieldResult != null) {
+                    val rf = v5.rawFieldResult!!
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("RAW FIELD / DEFORMATION (RAW / UNCALIBRATED):", color = Color.Yellow, fontWeight = FontWeight.Bold)
+                    Text("Mean Dx: ${String.format("%.2f", rf.meanDx)} | Mean Dy: ${String.format("%.2f", rf.meanDy)}", color = Color.LightGray)
+                    Text("Principal Values: λ1=${String.format("%.4f", rf.principalValue1)}, λ2=${String.format("%.4f", rf.principalValue2)}", color = Color.Cyan)
+                    Text("Principal Angle: ${String.format("%.1f°", rf.principalAngleDeg)}", color = Color.Cyan)
+                    Text("Isotropic Component: ${String.format("%.4f", rf.isotropicComponent)}", color = Color.LightGray)
+                    Text("Anisotropic Component: ${String.format("%.4f", rf.anisotropicComponent)}", color = Color.LightGray)
+                }
+
+                if (v5.debugBitmap != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("V5 DEBUG CORRESPONDENCE VISUALIZATION", color = Color.White, fontSize = 14.sp)
+                    androidx.compose.foundation.Image(
+                        bitmap = v5.debugBitmap!!.asImageBitmap(),
+                        contentDescription = "V5 Debug View",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(300.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .border(1.dp, Color.Gray, RoundedCornerShape(8.dp))
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(onClick = {
+                    val v5Export = buildString {
+                        appendLine("=== V5 GEOMETRIC CORRESPONDENCE EXPORT ===")
+                        appendLine("Timestamp: ${java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).format(java.util.Date())}")
+                        appendLine("Success: ${v5.success}")
+                        appendLine("Reference Points: ${tel.referencePointCount}")
+                        appendLine("Lens Points: ${tel.lensPointCount}")
+                        appendLine("Ref Median Spacing: ${tel.referenceMedianSpacing}")
+                        appendLine("Lens Median Spacing: ${tel.lensMedianSpacing}")
+                        appendLine("Candidate Pairs: ${tel.candidatePairCount}")
+                        appendLine("Seed Matches: ${tel.seedMatchCount}")
+                        appendLine("MNN Accepted: ${tel.mnnAcceptedCount}")
+                        appendLine("MNN Rejected Distance: ${tel.mnnRejectedDistance}")
+                        appendLine("MNN Rejected Non-Mutual: ${tel.mnnRejectedNonMutual}")
+                        appendLine("Final Accepted Matches: ${v5.correspondences.size}")
+                        appendLine("Q1: ${tel.q1Matches} | Q2: ${tel.q2Matches} | Q3: ${tel.q3Matches} | Q4: ${tel.q4Matches}")
+                        appendLine("Quadrants Covered: ${tel.quadrantsCovered}")
+                        appendLine("Coverage Pct: ${tel.coveragePct}%")
+                        appendLine("Prediction Tx: ${tel.predictionTx}")
+                        appendLine("Prediction Ty: ${tel.predictionTy}")
+                        appendLine("Prediction Rotation: ${tel.predictionRotationDeg}")
+                        appendLine("Prediction Scale: ${tel.predictionScale}")
+                        appendLine("Prediction RMS: ${tel.predictionRms}")
+                        v5.rawFieldResult?.let { rf ->
+                            appendLine("Mean Dx: ${rf.meanDx} | Mean Dy: ${rf.meanDy}")
+                            appendLine("Principal Value 1: ${rf.principalValue1}")
+                            appendLine("Principal Value 2: ${rf.principalValue2}")
+                            appendLine("Principal Angle: ${rf.principalAngleDeg}")
+                            appendLine("Isotropic: ${rf.isotropicComponent}")
+                            appendLine("Anisotropic: ${rf.anisotropicComponent}")
+                        }
+                    }
+                    clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(v5Export))
+                    android.widget.Toast.makeText(context, "V5 Test Data Copied to Clipboard", android.widget.Toast.LENGTH_SHORT).show()
+                }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Color.Cyan)) {
+                    Text("EXPORT V5 TEST DATA", color = Color.Black)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
             Button(onClick = {
                 val exportStr = buildString {
                     appendLine("--- V4 LENSOMETER EXPORT ---")
