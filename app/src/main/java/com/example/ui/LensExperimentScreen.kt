@@ -78,6 +78,9 @@ fun LensExperimentScreen() {
     
     val maxRuns = 3
     var runResults by remember { mutableStateOf(mutableListOf<LensMeasurementResult>()) }
+    var knownSph by remember { mutableStateOf("") }
+    var knownCyl by remember { mutableStateOf("") }
+    var knownAxis by remember { mutableStateOf("") }
     var frameCaptureCallback by remember { mutableStateOf<((ImageProxy) -> Unit)?>(null) }
     var alignMessage by remember { mutableStateOf("DETECTING LENS...") }
     var isStable by remember { mutableStateOf(false) }
@@ -479,15 +482,54 @@ fun LensExperimentScreen() {
                         Card(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), colors = CardDefaults.cardColors(containerColor = Color.DarkGray)) {
                             Column(modifier = Modifier.padding(16.dp)) {
                                 Text("RUN ${i + 1}", color = Color.Cyan, fontWeight = FontWeight.Bold)
-                                if (res.confidence.startsWith("FAILED")) {
-                                    Text(res.confidence, color = Color.Red, fontWeight = FontWeight.Bold)
-                                } else {
-                                    ResultRow("SPH", String.format("%.2f D", res.sph))
-                                    ResultRow("CYL", String.format("%.2f D", res.cyl))
-                                    ResultRow("AXIS", String.format("%.0f°", res.axis))
-                                    ResultRow("CONFIDENCE", res.confidence)
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Text("OPTICAL FIELD", color = Color.White, fontWeight = FontWeight.Bold)
+                                val analysisSuccess = res.analysisSuccess
+                                Text("ANALYSIS STATUS: ${if (analysisSuccess) "SUCCESS" else "FAILED"}", color = Color.White)
+                                
+                                Text("MEASUREMENT QUALITY: ${if (res.measurementQualityPass) "PASS" else "FAIL"}", color = if (res.measurementQualityPass) Color.Green else Color.Red, fontWeight = FontWeight.Bold)
+                                if (!res.measurementQualityPass) {
+                                    Text("Reason: ${res.qualityReason ?: "Unknown"}", color = Color.Yellow)
+                                }
+                                
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text("--------------------------------", color = Color.Gray)
+                                Text("RAW OPTICAL SIGNAL", color = Color.Yellow, fontWeight = FontWeight.Bold)
+                                ResultRow("Principal 1", res.principal1?.let { String.format("%.5f", it) } ?: "N/A")
+                                ResultRow("Principal 2", res.principal2?.let { String.format("%.5f", it) } ?: "N/A")
+                                ResultRow("Isotropic", res.isotropic?.let { String.format("%.5f", it) } ?: "N/A")
+                                ResultRow("Anisotropic", res.anisotropic?.let { String.format("%.5f", it) } ?: "N/A")
+                                ResultRow("Principal Angle 1", res.principalAngle1?.let { String.format("%.1f°", it) } ?: "N/A")
+                                ResultRow("Principal Angle 2", res.principalAngle2?.let { String.format("%.1f°", it) } ?: "N/A")
+                                val axisSignal = res.anisotropic?.let { if (it > 0.005) String.format("%.1f°", res.principalAngle1) else "UNDEFINED" } ?: "N/A"
+                                ResultRow("Axis Signal", axisSignal)
+
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text("--------------------------------", color = Color.Gray)
+                                Text("REGISTRATION", color = Color.Yellow, fontWeight = FontWeight.Bold)
+                                ResultRow("RMS", res.registrationRms?.let { String.format("%.3f", it) } ?: "N/A")
+                                ResultRow("Inliers", res.ransacInliers?.toString() ?: "N/A")
+
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text("--------------------------------", color = Color.Gray)
+                                Text("MATCHING", color = Color.Yellow, fontWeight = FontWeight.Bold)
+                                ResultRow("Reference inner points", res.referencePoints.toString())
+                                ResultRow("Tracked inner points", res.trackedPoints.toString())
+                                ResultRow("Coverage", "${res.coverage}%")
+
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text("--------------------------------", color = Color.Gray)
+                                Text("OPTICAL CENTER", color = Color.Yellow, fontWeight = FontWeight.Bold)
+                                ResultRow("X", res.opticalCenterX?.let { String.format("%.1f", it) } ?: "N/A")
+                                ResultRow("Y", res.opticalCenterY?.let { String.format("%.1f", it) } ?: "N/A")
+
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text("--------------------------------", color = Color.Gray)
+                                Text("SPH / CYL", color = Color.Yellow, fontWeight = FontWeight.Bold)
+                                ResultRow("SPH", "UNCALIBRATED")
+                                ResultRow("CYL", "UNCALIBRATED")
+                                ResultRow("AXIS", "UNCALIBRATED")
+
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text("OPTICAL FIELD", color = Color.White, fontWeight = FontWeight.Bold)
                                     val magFactor = 3.0f
                                     Box(modifier = Modifier.fillMaxWidth().aspectRatio(res.imageWidth.toFloat() / res.imageHeight.toFloat()).border(1.dp, Color.Gray)) {
                                         Canvas(modifier = Modifier.fillMaxSize()) {
@@ -502,12 +544,12 @@ fun LensExperimentScreen() {
                                             val scaleY = size.height / res.imageHeight
                                             
                                             drawCircle(Color.DarkGray, res.lensRadius.toFloat() * scaleX, Offset(res.geometricCenterX.toFloat() * scaleX, res.geometricCenterY.toFloat() * scaleY), style = Stroke(2f))
-                                            drawCircle(Color.Magenta, 10f, Offset(res.opticalCenterX.toFloat() * scaleX, res.opticalCenterY.toFloat() * scaleY))
+                                            drawCircle(Color.Magenta, 10f, Offset((res.opticalCenterX?.toFloat() ?: 0f) * scaleX, (res.opticalCenterY?.toFloat() ?: 0f) * scaleY))
                                             
-                                            val oc = Offset(res.opticalCenterX.toFloat() * scaleX, res.opticalCenterY.toFloat() * scaleY)
+                                            val oc = Offset((res.opticalCenterX?.toFloat() ?: 0f) * scaleX, (res.opticalCenterY?.toFloat() ?: 0f) * scaleY)
                                             val axLen = res.lensRadius.toFloat() * scaleX
-                                            val rad1 = res.p1Angle * Math.PI / 180.0
-                                            val rad2 = res.p2Angle * Math.PI / 180.0
+                                            val rad1 = (res.principalAngle1 ?: 0.0) * Math.PI / 180.0
+                                            val rad2 = (res.principalAngle2 ?: 0.0) * Math.PI / 180.0
                                             drawLine(Color.Cyan, oc - Offset((cos(rad1)*axLen).toFloat(), (sin(rad1)*axLen).toFloat()), oc + Offset((cos(rad1)*axLen).toFloat(), (sin(rad1)*axLen).toFloat()), 3f)
                                             drawLine(Color.Yellow, oc - Offset((cos(rad2)*axLen).toFloat(), (sin(rad2)*axLen).toFloat()), oc + Offset((cos(rad2)*axLen).toFloat(), (sin(rad2)*axLen).toFloat()), 3f)
                                             
@@ -521,26 +563,26 @@ fun LensExperimentScreen() {
                                             }
                                         }
                                     }
-                                }
                             }
                         }
                     }
                     
                     Spacer(modifier = Modifier.height(32.dp))
                     
-                    val validRuns = runResults.filter { !it.confidence.startsWith("FAILED") }
+                    val validRuns = runResults.filter { it.analysisSuccess && it.measurementQualityPass }
                     
                     if (validRuns.size >= 3) {
                         Text("REPEATABILITY GATES", color = Color.White, fontWeight = FontWeight.Bold)
                         
-                        val p1Mean = validRuns.map { it.p1 }.average()
-                        val p2Mean = validRuns.map { it.p2 }.average()
-                        val p1Std = Math.sqrt(validRuns.map { Math.pow(it.p1 - p1Mean, 2.0) }.average())
+                        val p1Mean = validRuns.mapNotNull { it.principal1 }.average()
+                        val p2Mean = validRuns.mapNotNull { it.principal2 }.average()
+                        val p1Std = Math.sqrt(validRuns.mapNotNull { it.principal1 }.map { Math.pow(it - p1Mean, 2.0) }.average())
                         
                         var sumSin = 0.0
                         var sumCos = 0.0
                         validRuns.forEach {
-                            val rad = 2 * it.p1Angle * Math.PI / 180.0
+                            val angle = it.principalAngle1 ?: 0.0
+                            val rad = 2 * angle * Math.PI / 180.0
                             sumSin += sin(rad)
                             sumCos += cos(rad)
                         }
@@ -550,9 +592,9 @@ fun LensExperimentScreen() {
                         val R = Math.sqrt(sumSin*sumSin + sumCos*sumCos) / validRuns.size
                         val angularDev = Math.sqrt(-2.0 * Math.log(R)) * 180.0 / Math.PI / 2.0
                         
-                        val ocxMean = validRuns.map { it.opticalCenterX }.average()
-                        val ocyMean = validRuns.map { it.opticalCenterY }.average()
-                        val ocStd = Math.sqrt(validRuns.map { hypot(it.opticalCenterX - ocxMean, it.opticalCenterY - ocyMean).pow(2) }.average())
+                        val ocxMean = validRuns.mapNotNull { it.opticalCenterX }.average()
+                        val ocyMean = validRuns.mapNotNull { it.opticalCenterY }.average()
+                        val ocStd = Math.sqrt(validRuns.mapNotNull { if (it.opticalCenterX != null && it.opticalCenterY != null) it else null }.map { hypot(it.opticalCenterX!! - ocxMean, it.opticalCenterY!! - ocyMean).pow(2) }.average())
                         
                         ResultRow("P1 Mean", String.format("%.5f ± %.5f", p1Mean, p1Std))
                         ResultRow("P2 Mean", String.format("%.5f", p2Mean))

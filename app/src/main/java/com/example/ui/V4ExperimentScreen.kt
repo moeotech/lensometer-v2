@@ -614,7 +614,8 @@ fun V4ResultDialog(result: V4Result, onDismiss: () -> Unit) {
                 Text("Reason: ${result.errorMessage}", color = Color.Yellow)
             }
             
-            Spacer(modifier = Modifier.height(32.dp))
+            
+
         }
     }
 }

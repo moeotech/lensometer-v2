@@ -18,10 +18,44 @@ object LensAnalyzer {
     
     fun analyze(noLensFrames: List<Bitmap>, withLensFrames: List<Bitmap>, lensGeom: LensGeometry?): LensMeasurementResult {
         if (noLensFrames.isEmpty() || withLensFrames.isEmpty()) {
-            return emptyResult("LOW - Missing Frames")
+            return LensMeasurementResult(
+            analysisSuccess = false,
+            analysisError = "LOW - Missing Frames",
+            measurementQualityPass = false,
+            qualityReason = "LOW - Missing Frames",
+            sph = null, cyl = null, axis = null, calibrated = false,
+            principal1 = null, principal2 = null, isotropic = null, anisotropic = null,
+            principalAngle1 = null, principalAngle2 = null,
+            confidence = "NONE",
+            registrationRms = null, ransacInliers = null,
+            trackedPoints = 0, referencePoints = 0, coverage = 0,
+            opticalCenterX = null, opticalCenterY = null,
+            meanDx = null, meanDy = null,
+            imageWidth = if (noLensFrames.isNotEmpty()) noLensFrames[0].width else 1, imageHeight = if (noLensFrames.isNotEmpty()) noLensFrames[0].height else 1,
+            geometricCenterX = lensGeom?.centerX ?: 0.0, geometricCenterY = lensGeom?.centerY ?: 0.0,
+            lensRadius = max(lensGeom?.width ?: 0.0, lensGeom?.height ?: 0.0) / 2.0,
+            vectors = emptyList()
+        )
         }
         if (lensGeom == null) {
-            return emptyResult("LOW - Missing Lens Geometry")
+            return LensMeasurementResult(
+            analysisSuccess = false,
+            analysisError = "LOW - Missing Lens Geometry",
+            measurementQualityPass = false,
+            qualityReason = "LOW - Missing Lens Geometry",
+            sph = null, cyl = null, axis = null, calibrated = false,
+            principal1 = null, principal2 = null, isotropic = null, anisotropic = null,
+            principalAngle1 = null, principalAngle2 = null,
+            confidence = "NONE",
+            registrationRms = null, ransacInliers = null,
+            trackedPoints = 0, referencePoints = 0, coverage = 0,
+            opticalCenterX = null, opticalCenterY = null,
+            meanDx = null, meanDy = null,
+            imageWidth = if (noLensFrames.isNotEmpty()) noLensFrames[0].width else 1, imageHeight = if (noLensFrames.isNotEmpty()) noLensFrames[0].height else 1,
+            geometricCenterX = lensGeom?.centerX ?: 0.0, geometricCenterY = lensGeom?.centerY ?: 0.0,
+            lensRadius = max(lensGeom?.width ?: 0.0, lensGeom?.height ?: 0.0) / 2.0,
+            vectors = emptyList()
+        )
         }
 
         val width = noLensFrames[0].width
@@ -152,15 +186,39 @@ object LensAnalyzer {
         
         val trackedCount = validMatches.size
         
-        // Quality Gates
-        if (homography.empty() || inliersCount < 20 || registrationRms.isNaN() || registrationRms.isInfinite() || trackedCount < 30) {
+        // Check if Analysis is truly impossible
+        if (homography.empty() || trackedCount < 3 || registrationRms.isNaN() || registrationRms.isInfinite()) {
             val reason = if (homography.empty()) "Homography failed"
-                         else if (inliersCount < 20) "Low RANSAC inliers"
                          else if (registrationRms.isNaN() || registrationRms.isInfinite()) "Invalid RMS"
-                         else "Low tracked points"
-            return emptyResult("FAILED - \$reason")
+                         else "Insufficient matched points ($trackedCount)"
+            return LensMeasurementResult(
+                analysisSuccess = false,
+                analysisError = reason,
+                measurementQualityPass = false,
+                qualityReason = reason,
+                sph = null, cyl = null, axis = null, calibrated = false,
+                principal1 = null, principal2 = null, isotropic = null, anisotropic = null,
+                principalAngle1 = null, principalAngle2 = null,
+                confidence = "NONE",
+                registrationRms = registrationRms.takeIf { !it.isNaN() && !it.isInfinite() },
+                ransacInliers = inliersCount,
+                trackedPoints = trackedCount, referencePoints = refInner.size, coverage = 0,
+                opticalCenterX = null, opticalCenterY = null,
+                meanDx = null, meanDy = null,
+                imageWidth = width, imageHeight = height,
+                geometricCenterX = lensGeom.centerX, geometricCenterY = lensGeom.centerY,
+                lensRadius = lensRadius,
+                vectors = emptyList()
+            )
         }
-
+        
+        var qualityPass = true
+        var qualityReason: String? = null
+        if (inliersCount < 20 || trackedCount < 30) {
+            qualityPass = false
+            qualityReason = if (inliersCount < 20) "Low RANSAC inliers ($inliersCount)" else "Low tracked points ($trackedCount)"
+        }
+        
         val vectors = mutableListOf<DisplacementVector>()
         var meanDx = 0.0; var meanDy = 0.0
         
@@ -211,16 +269,26 @@ object LensAnalyzer {
                          else "LOW"
         val coverage = (trackedCount.toDouble() / max(1.0, refInner.size.toDouble()) * 100).toInt()
         
+        val isotropic = (L1 + L2) / 2.0
+        val anisotropic = abs(L1 - L2)
+        
+        val axisOutput = if (anisotropic < 0.005) null else theta1
+
         return LensMeasurementResult(
-            sph = 0.0, cyl = 0.0, axis = 0.0, calibrated = false,
+            analysisSuccess = true,
+            analysisError = null,
+            measurementQualityPass = qualityPass,
+            qualityReason = qualityReason,
+            sph = null, cyl = null, axis = null, calibrated = false,
+            principal1 = L1, principal2 = L2, isotropic = isotropic, anisotropic = anisotropic,
+            principalAngle1 = theta1, principalAngle2 = theta2,
             confidence = confidence,
-            trackedPoints = trackedCount,
-            coverage = coverage,
-            meanDx = meanDx, meanDy = meanDy,
-            p1 = L1, p1Angle = theta1,
-            p2 = L2, p2Angle = theta2,
             registrationRms = registrationRms,
             ransacInliers = inliersCount,
+            trackedPoints = trackedCount,
+            referencePoints = refInner.size,
+            coverage = coverage,
+            meanDx = meanDx, meanDy = meanDy,
             imageWidth = width, imageHeight = height,
             geometricCenterX = lensGeom.centerX, geometricCenterY = lensGeom.centerY,
             opticalCenterX = optCx, opticalCenterY = optCy,
@@ -344,7 +412,4 @@ object LensAnalyzer {
         return doubleArrayOf(a, b, c, d, e, f)
     }
 
-    private fun emptyResult(confidence: String): LensMeasurementResult {
-        return LensMeasurementResult(0.0, 0.0, 0.0, false, confidence, 0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, emptyList())
     }
-}

@@ -1565,7 +1565,17 @@ object V4OpticalAnalyzer {
             registrationTy = validRuns.map { it.registrationTy }.average(),
             registrationScale = validRuns.map { it.registrationScale }.average(),
             axis = axisOutput,
-            experimentalPower = V4OpticalCalibration.estimatePower(lambda1Med, lambda2Med, axisOutput, qualPass, validRuns.map { it.fieldFitRms }.average())
+            experimentalPower = V4OpticalCalibration.estimatePower(
+                RawOpticalSignal(
+                    principal1 = lambda1Med,
+                    principal2 = lambda2Med,
+                    axisDeg = if (axisOutput > 0) axisOutput else null,
+                    isotropic = isoMed,
+                    anisotropic = anisoMed
+                ),
+                qualPass, 
+                validRuns.map { it.fieldFitRms }.average()
+            )
         )
     }
     
