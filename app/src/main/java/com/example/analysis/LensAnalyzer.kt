@@ -4,6 +4,8 @@ import android.graphics.Bitmap
 import com.example.model.LensMeasurementResult
 import com.example.model.DisplacementVector
 import com.example.model.LensGeometry
+import com.example.model.PointCoord
+import com.example.model.MatchPairData
 import org.opencv.android.Utils
 import org.opencv.calib3d.Calib3d
 import org.opencv.core.Core
@@ -17,57 +19,50 @@ import kotlin.math.*
 object LensAnalyzer {
     
     fun analyze(noLensFrames: List<Bitmap>, withLensFrames: List<Bitmap>, lensGeom: LensGeometry?): LensMeasurementResult {
-        if (noLensFrames.isEmpty() || withLensFrames.isEmpty()) {
-            return LensMeasurementResult(
-            analysisSuccess = false,
-            analysisError = "LOW - Missing Frames",
-            measurementQualityPass = false,
-            qualityReason = "LOW - Missing Frames",
-            sph = null, cyl = null, axis = null, calibrated = false,
-            principal1 = null, principal2 = null, isotropic = null, anisotropic = null,
-            principalAngle1 = null, principalAngle2 = null,
-            confidence = "NONE",
-            registrationRms = null, ransacInliers = null,
-            trackedPoints = 0, referencePoints = 0, coverage = 0,
-            opticalCenterX = null, opticalCenterY = null,
-            meanDx = null, meanDy = null,
-            imageWidth = if (noLensFrames.isNotEmpty()) noLensFrames[0].width else 1, imageHeight = if (noLensFrames.isNotEmpty()) noLensFrames[0].height else 1,
-            geometricCenterX = lensGeom?.centerX ?: 0.0, geometricCenterY = lensGeom?.centerY ?: 0.0,
-            lensRadius = max(lensGeom?.width ?: 0.0, lensGeom?.height ?: 0.0) / 2.0,
-            vectors = emptyList()
-        )
-        }
-        if (lensGeom == null) {
-            return LensMeasurementResult(
-            analysisSuccess = false,
-            analysisError = "LOW - Missing Lens Geometry",
-            measurementQualityPass = false,
-            qualityReason = "LOW - Missing Lens Geometry",
-            sph = null, cyl = null, axis = null, calibrated = false,
-            principal1 = null, principal2 = null, isotropic = null, anisotropic = null,
-            principalAngle1 = null, principalAngle2 = null,
-            confidence = "NONE",
-            registrationRms = null, ransacInliers = null,
-            trackedPoints = 0, referencePoints = 0, coverage = 0,
-            opticalCenterX = null, opticalCenterY = null,
-            meanDx = null, meanDy = null,
-            imageWidth = if (noLensFrames.isNotEmpty()) noLensFrames[0].width else 1, imageHeight = if (noLensFrames.isNotEmpty()) noLensFrames[0].height else 1,
-            geometricCenterX = lensGeom?.centerX ?: 0.0, geometricCenterY = lensGeom?.centerY ?: 0.0,
-            lensRadius = max(lensGeom?.width ?: 0.0, lensGeom?.height ?: 0.0) / 2.0,
-            vectors = emptyList()
-        )
-        }
-
-        val width = noLensFrames[0].width
-        val height = noLensFrames[0].height
+        val width = if (noLensFrames.isNotEmpty()) noLensFrames[0].width else 1
+        val height = if (noLensFrames.isNotEmpty()) noLensFrames[0].height else 1
         val cx = width / 2.0
         val cy = height / 2.0
-        val lensRadius = max(lensGeom.width, lensGeom.height) / 2.0
-        
+        val lensRadius = max(lensGeom?.width ?: 0.0, lensGeom?.height ?: 0.0) / 2.0
+
+        if (noLensFrames.isEmpty() || withLensFrames.isEmpty() || lensGeom == null) {
+            val err = if (noLensFrames.isEmpty() || withLensFrames.isEmpty()) "LOW - Missing Frames" else "LOW - Missing Lens Geometry"
+            return LensMeasurementResult(
+                analysisSuccess = false,
+                analysisError = err,
+                measurementQualityPass = false,
+                qualityReason = err,
+                sph = null, cyl = null, axis = null, calibrated = false,
+                principal1 = null, principal2 = null, isotropic = null, anisotropic = null,
+                principalAngle1 = null, principalAngle2 = null,
+                confidence = "NONE",
+                registrationRms = null, ransacInliers = null,
+                trackedPoints = 0, referencePoints = 0, coverage = 0,
+                totalReferenceDots = 0, outerReferenceDotsCount = 0, innerReferenceDotsCount = 0,
+                totalLensDots = 0, outerLensDotsCount = 0, innerLensDotsCount = 0,
+                candidateOuterMatches = 0, acceptedOuterMatches = 0, transformType = "None",
+                innerReferenceCandidatesCount = 0, innerLensCandidatesCount = 0,
+                mutualNearestNeighborMatches = 0, rejectedByDistance = 0, rejectedByTopology = 0,
+                rejectedByDuplicateAssignment = 0, rejectedByQuadrantRoi = 0, rejectedByGeometricConsistency = 0,
+                q1Matches = 0, q2Matches = 0, q3Matches = 0, q4Matches = 0,
+                referenceInnerPoints = emptyList(), lensInnerPoints = emptyList(),
+                acceptedMatchesList = emptyList(), rejectedReferencePoints = emptyList(), rejectedLensPoints = emptyList(),
+                opticalCenterX = null, opticalCenterY = null,
+                meanDx = null, meanDy = null,
+                imageWidth = width, imageHeight = height,
+                geometricCenterX = lensGeom?.centerX ?: cx, geometricCenterY = lensGeom?.centerY ?: cy,
+                lensRadius = lensRadius,
+                vectors = emptyList()
+            )
+        }
+
         // 1. Multi-frame averaging / median of dots
         val refDots = extractStableDots(noLensFrames)
         val testDotsLocal = extractStableDots(withLensFrames)
         
+        val totalReferenceDots = refDots.size
+        val totalLensDots = testDotsLocal.size
+
         val angleRad = lensGeom.rotationAngle * PI / 180.0
         val cosA = cos(angleRad)
         val sinA = sin(angleRad)
@@ -92,6 +87,9 @@ object LensAnalyzer {
             else if (rSq > 1.21) refOuter.add(p) // 1.1^2
         }
         
+        val innerReferenceDotsCount = refInner.size
+        val outerReferenceDotsCount = refOuter.size
+
         val testInnerLocal = mutableListOf<Point>(); val testOuterLocal = mutableListOf<Point>()
         for (p in testDotsLocal) {
             val rSq = getNormalizedRadiusSq(p)
@@ -99,10 +97,16 @@ object LensAnalyzer {
             else if (rSq > 1.21) testOuterLocal.add(p)
         }
         
+        val innerLensDotsCount = testInnerLocal.size
+        val outerLensDotsCount = testOuterLocal.size
+
         // 2. Global Registration (using REAL OpenCV Homography)
-        var registrationRms = 0.0
-        var inliersCount = 0
+        var registrationRms: Double? = null
+        var inliersCount: Int? = null
         var homography = Mat.eye(3, 3, CvType.CV_64F)
+        var candidateOuterMatches = 0
+        var acceptedOuterMatches = 0
+        var transformType = "Identity / Fallback"
         
         if (refOuter.size >= 4 && testOuterLocal.size >= 4) {
             val matchedSrc = mutableListOf<Point>()
@@ -115,12 +119,14 @@ object LensAnalyzer {
                     if (d < bestD) { bestD = d; bestRp = rp }
                 }
                 if (bestRp != null) {
+                    candidateOuterMatches++
                     var bestD2 = 30.0; var bestTp: Point? = null
                     for (tp2 in testOuterLocal) {
                         val d2 = hypot(tp2.x - bestRp.x, tp2.y - bestRp.y)
                         if (d2 < bestD2) { bestD2 = d2; bestTp = tp2 }
                     }
                     if (bestTp == tp) {
+                        acceptedOuterMatches++
                         matchedSrc.add(tp)
                         matchedDst.add(bestRp)
                     }
@@ -136,7 +142,9 @@ object LensAnalyzer {
                 
                 if (!H.empty()) {
                     homography = H
-                    inliersCount = Core.countNonZero(mask)
+                    val inliers = Core.countNonZero(mask)
+                    inliersCount = inliers
+                    transformType = "Homography (RANSAC)"
                     var sqErr = 0.0
                     val maskArray = ByteArray(mask.rows() * mask.cols())
                     mask.get(0, 0, maskArray)
@@ -148,7 +156,7 @@ object LensAnalyzer {
                             sqErr += hypot(transArr[i].x - matchedDst[i].x, transArr[i].y - matchedDst[i].y).pow(2)
                         }
                     }
-                    registrationRms = if (inliersCount > 0) sqrt(sqErr / inliersCount) else 0.0
+                    registrationRms = if (inliers > 0) sqrt(sqErr / inliers) else 0.0
                 }
             }
         }
@@ -164,61 +172,83 @@ object LensAnalyzer {
             testInner.addAll(testInnerLocal)
         }
         
-        // 3. Match Inner Dots (One-To-One Mutual NN)
+        val innerReferenceCandidatesCount = refInner.size
+        val innerLensCandidatesCount = testInner.size
+
+        // 3. Match Inner Dots (One-To-One Mutual NN) with full telemetry
+        var mutualNearestNeighborMatches = 0
+        var rejectedByDistance = 0
+        var rejectedByTopology = 0
+        var rejectedByDuplicateAssignment = 0
+        var rejectedByQuadrantRoi = 0
+        var rejectedByGeometricConsistency = 0
+
         val validMatches = mutableListOf<Pair<Point, Point>>()
+        val acceptedMatchesList = mutableListOf<MatchPairData>()
+        val rejectedLensPoints = mutableListOf<PointCoord>()
+
         for (tp in testInner) {
             var bestD = 30.0; var bestRp: Point? = null
             for (rp in refInner) {
                 val d = hypot(tp.x - rp.x, tp.y - rp.y)
                 if (d < bestD) { bestD = d; bestRp = rp }
             }
-            if (bestRp != null) {
+            if (bestRp == null || bestD > 30.0) {
+                rejectedByDistance++
+                rejectedLensPoints.add(PointCoord(tp.x, tp.y))
+                val dVal = bestD
+                acceptedMatchesList.add(MatchPairData(bestRp?.x ?: tp.x, bestRp?.y ?: tp.y, tp.x, tp.y, false, if (bestRp == null) "No nearby reference dot" else "Distance ${String.format("%.1f", dVal)} > 30px"))
+            } else {
                 var bestD2 = 30.0; var bestTp: Point? = null
                 for (tp2 in testInner) {
                     val d2 = hypot(tp2.x - bestRp.x, tp2.y - bestRp.y)
                     if (d2 < bestD2) { bestD2 = d2; bestTp = tp2 }
                 }
-                if (bestTp == tp) {
+                if (bestTp != tp) {
+                    rejectedByDuplicateAssignment++
+                    rejectedLensPoints.add(PointCoord(tp.x, tp.y))
+                    acceptedMatchesList.add(MatchPairData(bestRp.x, bestRp.y, tp.x, tp.y, false, "Duplicate assignment / MNN failed"))
+                } else {
+                    mutualNearestNeighborMatches++
                     validMatches.add(Pair(bestRp, tp))
+                    acceptedMatchesList.add(MatchPairData(bestRp.x, bestRp.y, tp.x, tp.y, true, null))
                 }
             }
         }
         
         val trackedCount = validMatches.size
-        
-        // Check if Analysis is truly impossible
-        if (homography.empty() || trackedCount < 3 || registrationRms.isNaN() || registrationRms.isInfinite()) {
-            val reason = if (homography.empty()) "Homography failed"
-                         else if (registrationRms.isNaN() || registrationRms.isInfinite()) "Invalid RMS"
-                         else "Insufficient matched points ($trackedCount)"
-            return LensMeasurementResult(
-                analysisSuccess = false,
-                analysisError = reason,
-                measurementQualityPass = false,
-                qualityReason = reason,
-                sph = null, cyl = null, axis = null, calibrated = false,
-                principal1 = null, principal2 = null, isotropic = null, anisotropic = null,
-                principalAngle1 = null, principalAngle2 = null,
-                confidence = "NONE",
-                registrationRms = registrationRms.takeIf { !it.isNaN() && !it.isInfinite() },
-                ransacInliers = inliersCount,
-                trackedPoints = trackedCount, referencePoints = refInner.size, coverage = 0,
-                opticalCenterX = null, opticalCenterY = null,
-                meanDx = null, meanDy = null,
-                imageWidth = width, imageHeight = height,
-                geometricCenterX = lensGeom.centerX, geometricCenterY = lensGeom.centerY,
-                lensRadius = lensRadius,
-                vectors = emptyList()
-            )
+
+        val referenceInnerPoints = refInner.map { PointCoord(it.x, it.y) }
+        val lensInnerPoints = testInner.map { PointCoord(it.x, it.y) }
+
+        val matchedRefPoints = validMatches.map { it.first }.toSet()
+        val rejectedReferencePoints = mutableListOf<PointCoord>()
+        for (rp in refInner) {
+            if (!matchedRefPoints.contains(rp)) {
+                rejectedReferencePoints.add(PointCoord(rp.x, rp.y))
+            }
         }
-        
+
+        var q1 = 0; var q2 = 0; var q3 = 0; var q4 = 0
+        for (m in validMatches) {
+            val t = m.second
+            if (t.x >= cx && t.y < cy) q1++
+            else if (t.x < cx && t.y < cy) q2++
+            else if (t.x < cx && t.y >= cy) q3++
+            else q4++
+        }
+
+        val coverage = (trackedCount.toDouble() / max(1.0, refInner.size.toDouble()) * 100).toInt()
+
         var qualityPass = true
         var qualityReason: String? = null
-        if (inliersCount < 20 || trackedCount < 30) {
+        if (trackedCount < 3 || (inliersCount ?: 0) < 20 || trackedCount < 30) {
             qualityPass = false
-            qualityReason = if (inliersCount < 20) "Low RANSAC inliers ($inliersCount)" else "Low tracked points ($trackedCount)"
+            qualityReason = if (trackedCount < 3) "Insufficient spatial correspondence (Matches: $trackedCount)"
+                            else if ((inliersCount ?: 0) < 20) "Low RANSAC inliers ($inliersCount)"
+                            else "Low tracked points ($trackedCount)"
         }
-        
+
         val vectors = mutableListOf<DisplacementVector>()
         var meanDx = 0.0; var meanDy = 0.0
         
@@ -234,45 +264,44 @@ object LensAnalyzer {
         }
         if (trackedCount > 0) { meanDx /= trackedCount; meanDy /= trackedCount }
         
-        var L1 = 0.0; var L2 = 0.0; var theta1 = 0.0; var theta2 = 0.0
-        var optCx = cx; var optCy = cy
+        var L1: Double? = null; var L2: Double? = null; var theta1: Double? = null; var theta2: Double? = null
+        var optCx: Double? = null; var optCy: Double? = null
         
-        val fieldAffine = computeAffine(pointsX, disps)
-        if (fieldAffine != null) {
-            val A = fieldAffine[0]; val B = fieldAffine[1]; val C = fieldAffine[2]
-            val D = fieldAffine[3]; val E = fieldAffine[4]; val F = fieldAffine[5]
-            
-            val detA = A * E - B * D
-            if (abs(detA) > 1e-8) {
-                val X_oc = (B * F - C * E) / detA
-                val Y_oc = (C * D - A * F) / detA
-                optCx = cx + X_oc
-                optCy = cy + Y_oc
+        if (trackedCount >= 3) {
+            val fieldAffine = computeAffine(pointsX, disps)
+            if (fieldAffine != null) {
+                val A = fieldAffine[0]; val B = fieldAffine[1]; val C = fieldAffine[2]
+                val D = fieldAffine[3]; val E = fieldAffine[4]; val F = fieldAffine[5]
+                
+                val detA = A * E - B * D
+                if (abs(detA) > 1e-8) {
+                    val X_oc = (B * F - C * E) / detA
+                    val Y_oc = (C * D - A * F) / detA
+                    optCx = cx + X_oc
+                    optCy = cy + Y_oc
+                }
+                
+                val Sxy = (B + D) / 2.0
+                val tr = A + E
+                val detS = A * E - Sxy * Sxy
+                val root = sqrt(max(0.0, tr * tr / 4.0 - detS))
+                val l1 = tr / 2.0 + root
+                val l2 = tr / 2.0 - root
+                L1 = l1; L2 = l2
+                
+                var t1 = atan2(l1 - A, Sxy) * 180.0 / PI
+                if (t1 < 0) t1 += 180.0
+                theta1 = t1
+                theta2 = t1 + 90.0
             }
-            
-            val Sxy = (B + D) / 2.0
-            val tr = A + E
-            val detS = A * E - Sxy * Sxy
-            val root = sqrt(max(0.0, tr * tr / 4.0 - detS))
-            L1 = tr / 2.0 + root
-            L2 = tr / 2.0 - root
-            
-            theta1 = atan2(L1 - A, Sxy) * 180.0 / PI
-            var t1Deg = theta1
-            if (t1Deg < 0) t1Deg += 180.0
-            theta1 = t1Deg
-            theta2 = t1Deg + 90.0
         }
         
-        val confidence = if (trackedCount >= 100 && registrationRms < 3.0) "HIGH" 
+        val confidence = if (trackedCount >= 100 && (registrationRms ?: 99.0) < 3.0) "HIGH" 
                          else if (trackedCount >= 50) "MEDIUM" 
                          else "LOW"
-        val coverage = (trackedCount.toDouble() / max(1.0, refInner.size.toDouble()) * 100).toInt()
-        
-        val isotropic = (L1 + L2) / 2.0
-        val anisotropic = abs(L1 - L2)
-        
-        val axisOutput = if (anisotropic < 0.005) null else theta1
+
+        val isotropic = if (L1 != null && L2 != null) (L1 + L2) / 2.0 else null
+        val anisotropic = if (L1 != null && L2 != null) abs(L1 - L2) else null
 
         return LensMeasurementResult(
             analysisSuccess = true,
@@ -288,10 +317,40 @@ object LensAnalyzer {
             trackedPoints = trackedCount,
             referencePoints = refInner.size,
             coverage = coverage,
-            meanDx = meanDx, meanDy = meanDy,
-            imageWidth = width, imageHeight = height,
-            geometricCenterX = lensGeom.centerX, geometricCenterY = lensGeom.centerY,
-            opticalCenterX = optCx, opticalCenterY = optCy,
+            totalReferenceDots = totalReferenceDots,
+            outerReferenceDotsCount = outerReferenceDotsCount,
+            innerReferenceDotsCount = innerReferenceDotsCount,
+            totalLensDots = totalLensDots,
+            outerLensDotsCount = outerLensDotsCount,
+            innerLensDotsCount = innerLensDotsCount,
+            candidateOuterMatches = candidateOuterMatches,
+            acceptedOuterMatches = acceptedOuterMatches,
+            transformType = transformType,
+            innerReferenceCandidatesCount = innerReferenceCandidatesCount,
+            innerLensCandidatesCount = innerLensCandidatesCount,
+            mutualNearestNeighborMatches = mutualNearestNeighborMatches,
+            rejectedByDistance = rejectedByDistance,
+            rejectedByTopology = rejectedByTopology,
+            rejectedByDuplicateAssignment = rejectedByDuplicateAssignment,
+            rejectedByQuadrantRoi = rejectedByQuadrantRoi,
+            rejectedByGeometricConsistency = rejectedByGeometricConsistency,
+            q1Matches = q1,
+            q2Matches = q2,
+            q3Matches = q3,
+            q4Matches = q4,
+            referenceInnerPoints = referenceInnerPoints,
+            lensInnerPoints = lensInnerPoints,
+            acceptedMatchesList = acceptedMatchesList,
+            rejectedReferencePoints = rejectedReferencePoints,
+            rejectedLensPoints = rejectedLensPoints,
+            meanDx = meanDx.takeIf { trackedCount > 0 },
+            meanDy = meanDy.takeIf { trackedCount > 0 },
+            imageWidth = width,
+            imageHeight = height,
+            geometricCenterX = lensGeom.centerX,
+            geometricCenterY = lensGeom.centerY,
+            opticalCenterX = optCx,
+            opticalCenterY = optCy,
             lensRadius = lensRadius,
             vectors = vectors
         )
@@ -373,7 +432,6 @@ object LensAnalyzer {
 
     class LocalPoint(val x: Double, val y: Double)
 
-    // Make computeAffine public for testing
     fun computeAffine(src: List<LocalPoint>, dst: List<LocalPoint>): DoubleArray? {
         if (src.size < 3) return null
         var sx = 0.0; var sy = 0.0; var sxx = 0.0; var syy = 0.0; var sxy = 0.0
@@ -412,4 +470,4 @@ object LensAnalyzer {
         return doubleArrayOf(a, b, c, d, e, f)
     }
 
-    }
+}
