@@ -124,9 +124,10 @@ fun V4ExperimentScreen() {
                 imageAnalysisRef = imageAnalysis
                 
                 try {
+                                        cameraProvider.unbindAll()
                                         val camera = cameraProvider.bindToLifecycle(
                         lifecycleOwner,
-                        CameraSelector.DEFAULT_BACK_CAMERA,
+                        if (cameraProvider.hasCamera(CameraSelector.DEFAULT_BACK_CAMERA)) CameraSelector.DEFAULT_BACK_CAMERA else CameraSelector.DEFAULT_FRONT_CAMERA,
                         preview,
                         imageAnalysis
                     )
@@ -142,8 +143,8 @@ fun V4ExperimentScreen() {
             if (cameraProviderFuture.isDone) {
                 val provider = cameraProviderFuture.get()
                                 imageAnalysisRef?.clearAnalyzer()
-                                if (previewRef != null) provider.unbind(previewRef)
-                if (imageAnalysisRef != null) provider.unbind(imageAnalysisRef)
+                                provider.unbindAll()
+                
                 
 
             }
@@ -347,14 +348,21 @@ fun V4ResultDialog(result: V4Result, noLensFrames: List<Bitmap>, withLensFrames:
     val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
     val context = androidx.compose.ui.platform.LocalContext.current
 
-    var v5Result by remember { mutableStateOf<V5MatchResult?>(null) }
+    var v5Result by remember { mutableStateOf<com.example.analysis.v5.V5MatchResult?>(null) }
     var isV5Analyzing by remember { mutableStateOf(true) }
+    
+    var v6Result by remember { mutableStateOf<com.example.analysis.v6.V6Result?>(null) }
+    var isV6Analyzing by remember { mutableStateOf(true) }
 
     LaunchedEffect(Unit) {
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
             val res = V5DeflectometryAnalyzer.analyze(noLensFrames, withLensFrames)
             v5Result = res
             isV5Analyzing = false
+            
+            val res6 = com.example.analysis.v6.V6StructuredDeflectometryAnalyzer.analyze(noLensFrames, withLensFrames)
+            v6Result = res6
+            isV6Analyzing = false
         }
     }
 
@@ -470,6 +478,91 @@ fun V4ResultDialog(result: V4Result, noLensFrames: List<Bitmap>, withLensFrames:
                     android.widget.Toast.makeText(context, "V5 Test Data Copied to Clipboard", android.widget.Toast.LENGTH_SHORT).show()
                 }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Color.Cyan)) {
                     Text("EXPORT V5 TEST DATA", color = Color.Black)
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            // --- V6 SECTION ---
+            Text("--- V6 STRUCTURED DEFLECTOMETRY ---", color = Color.Yellow, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            if (isV6Analyzing) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                Text("Running V6 structured deflectometry...", color = Color.Cyan)
+            } else if (v6Result != null) {
+                val v6 = v6Result!!
+                val tel = v6.telemetry
+                Text(
+                    text = "V6 Status: ${if (tel.success) "SUCCESS" else "FAILED"} (${tel.failureReason})",
+                    color = if (tel.success) Color.Green else Color.Red
+                )
+                Text("Reference Valid Cells: ${tel.referenceValidCells} | Lens Valid Cells: ${tel.lensValidCells}", color = Color.LightGray)
+                Text("Valid Directional Vectors: ${tel.validDirectionalVectors}", color = Color.Green, fontWeight = FontWeight.Bold)
+                Text("Ratio Median: ${String.format("%.4f", tel.ratioMedian)} | Ratio Range: ${String.format("%.4f", tel.ratioRange)}", color = Color.Cyan)
+                Text("Directional Consistency: ${tel.directionalConsistency}", color = Color.LightGray)
+                
+                if (v6.fitResult != null) {
+                    val f = v6.fitResult!!
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("SINUSOIDAL FITTING (RAW RATIOS):", color = Color.Yellow, fontWeight = FontWeight.Bold)
+                    Text("A0 (Mean Ratio): ${String.format("%.4f", f.a0)}", color = Color.Cyan)
+                    Text("ACos: ${String.format("%.4f", f.aCos)} | ASin: ${String.format("%.4f", f.aSin)}", color = Color.LightGray)
+                    Text("Astigmatic Amplitude: ${String.format("%.4f", f.astigmaticAmplitude)}", color = Color.LightGray)
+                    Text("Principal Orientation: ${String.format("%.1f°", f.principalOrientation)}", color = Color.Cyan)
+                }
+
+                if (v6.debugBitmap != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("V6 DEBUG VISUALIZATION", color = Color.White, fontSize = 14.sp)
+                    androidx.compose.foundation.Image(
+                        bitmap = v6.debugBitmap!!.asImageBitmap(),
+                        contentDescription = "V6 Debug View",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(300.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .border(1.dp, Color.Gray, RoundedCornerShape(8.dp))
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(onClick = {
+                    val v6Export = buildString {
+                        appendLine("=== V6 STRUCTURED DEFLECTOMETRY EXPORT ===")
+                        appendLine("Timestamp: ${java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).format(java.util.Date())}")
+                        appendLine("Git Commit: ${tel.gitCommit}")
+                        appendLine("Success: ${tel.success} (${tel.failureReason})")
+                        appendLine("Reference Valid Cells: ${tel.referenceValidCells}")
+                        appendLine("Lens Valid Cells: ${tel.lensValidCells}")
+                        appendLine("Valid Directional Vectors: ${tel.validDirectionalVectors}")
+                        appendLine("Ratio Median: ${tel.ratioMedian}")
+                        appendLine("Ratio Range: ${tel.ratioRange}")
+                        appendLine("Directional Consistency: ${tel.directionalConsistency}")
+                        appendLine("")
+                        if (v6.fitResult != null) {
+                            val f = v6.fitResult!!
+                            appendLine("--- RAW SINUSOIDAL FIT ---")
+                            appendLine("A0 (Mean Ratio): ${f.a0}")
+                            appendLine("ACos: ${f.aCos}")
+                            appendLine("ASin: ${f.aSin}")
+                            appendLine("Amplitude: ${f.astigmaticAmplitude}")
+                            appendLine("Orientation: ${f.principalOrientation}")
+                            appendLine("")
+                        }
+                        appendLine("--- DEVICE GEOMETRY ---")
+                        appendLine("CameraToLensMm: ${tel.deviceGeometry.cameraToLensDistanceMm}")
+                        appendLine("LensToTargetMm: ${tel.deviceGeometry.lensToTargetDistanceMm}")
+                        appendLine("TargetDotSpacingMm: ${tel.deviceGeometry.targetDotSpacingMm}")
+                        appendLine("TargetVersion: ${tel.deviceGeometry.targetVersion}")
+                        appendLine("")
+                        appendLine("--- RAW DIRECTIONAL MEASUREMENTS ---")
+                        for (m in v6.measurements) {
+                            appendLine("Angle: ${String.format("%.1f", m.angleDegrees)}, RefR: ${String.format("%.2f", m.radiusReference)}, LensR: ${String.format("%.2f", m.radiusLens)}, Ratio: ${String.format("%.4f", m.radiusRatio)}")
+                        }
+                    }
+                    clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(v6Export))
+                    android.widget.Toast.makeText(context, "V6 Test Data Copied to Clipboard", android.widget.Toast.LENGTH_SHORT).show()
+                }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Color.Magenta)) {
+                    Text("EXPORT V6 TEST DATA", color = Color.White)
                 }
             }
 

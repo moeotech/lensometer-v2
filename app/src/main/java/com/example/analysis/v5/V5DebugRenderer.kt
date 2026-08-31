@@ -14,6 +14,8 @@ object V5DebugRenderer {
         lensPoints: List<Point>,
         correspondences: List<V5Correspondence>,
         seedIndices: Set<Int>,
+        seedRejectedIndices: Set<Int> = emptySet(),
+        rawSeedCorrespondences: List<V5Correspondence> = emptyList(),
         telemetry: V5Telemetry? = null
     ): Bitmap {
         val w = if (width > 0) width else 800
@@ -39,13 +41,27 @@ object V5DebugRenderer {
             canvas.drawCircle(pt.x.toFloat(), pt.y.toFloat(), 4f, paint)
         }
 
+        // Draw raw seed rejected in RED
+        paint.color = Color.parseColor("#FF1744")
+        paint.strokeWidth = 1.5f
+        for (seed in rawSeedCorrespondences) {
+            if (seedRejectedIndices.contains(seed.referenceIndex)) {
+                canvas.drawLine(
+                    seed.referencePoint.x.toFloat(), seed.referencePoint.y.toFloat(),
+                    seed.observedPoint.x.toFloat(), seed.observedPoint.y.toFloat(),
+                    paint
+                )
+                canvas.drawCircle(seed.observedPoint.x.toFloat(), seed.observedPoint.y.toFloat(), 3f, paint)
+            }
+        }
+
         // Draw correspondences
         for (corr in correspondences) {
             if (corr.isInlier) {
                 paint.color = if (seedIndices.contains(corr.referenceIndex)) {
-                    Color.parseColor("#00E676") // Green for seeds
+                    Color.parseColor("#00E676") // Green for seed RANSAC inliers
                 } else {
-                    Color.parseColor("#2979FF") // Blue/Cyan for accepted inliers
+                    Color.parseColor("#2979FF") // Blue for accepted inliers
                 }
                 paint.strokeWidth = 2.5f
                 canvas.drawLine(
@@ -53,10 +69,8 @@ object V5DebugRenderer {
                     corr.observedPoint.x.toFloat(), corr.observedPoint.y.toFloat(),
                     paint
                 )
-                paint.color = Color.parseColor("#00E676")
                 canvas.drawCircle(corr.observedPoint.x.toFloat(), corr.observedPoint.y.toFloat(), 4f, paint)
             } else {
-                // Rejected / Outlier in thin red
                 paint.color = Color.parseColor("#FF1744")
                 paint.strokeWidth = 1f
                 canvas.drawLine(
@@ -75,11 +89,11 @@ object V5DebugRenderer {
         if (telemetry != null) {
             paint.textSize = 18f
             paint.color = Color.parseColor("#00E676")
-            canvas.drawText("Accepted: ${telemetry.acceptedInlierMatches} | Seeds: ${telemetry.seedMatchCount}", 30f, 82f, paint)
+            canvas.drawText("Raw Seeds: ${telemetry.seedMatchesRaw} | RANSAC Inliers: ${telemetry.seedRansacInliers} | Rejected: ${telemetry.seedRansacRejected}", 30f, 82f, paint)
             paint.color = Color.parseColor("#00E5FF")
-            canvas.drawText("Median Res: ${String.format("%.1f", telemetry.medianResidualPx)}px | MAD: ${String.format("%.1f", telemetry.residualMadPx)}px", 30f, 110f, paint)
+            canvas.drawText("Seed RMS: ${String.format("%.2f", telemetry.seedRansacRms)}px | Final Accepted: ${telemetry.acceptedInlierMatches}", 30f, 110f, paint)
             paint.color = Color.parseColor("#FFD600")
-            canvas.drawText("Max Res: ${String.format("%.1f", telemetry.maxAcceptedResidualPx)}px | RMS: ${String.format("%.2f", telemetry.transformRms)}px", 30f, 138f, paint)
+            canvas.drawText("Median Res: ${String.format("%.1f", telemetry.medianResidualPx)}px | Coverage: ${String.format("%.1f", telemetry.coveragePct)}%", 30f, 138f, paint)
         }
 
         return bitmap

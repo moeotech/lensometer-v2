@@ -85,6 +85,8 @@ object V5DeflectometryAnalyzer {
             lensPoints = lensPoints,
             correspondences = correspondences,
             seedIndices = seedIndices,
+            seedRejectedIndices = matcherOutput.seedRejectedIndices,
+            rawSeedCorrespondences = matcherOutput.rawSeedCorrespondences,
             telemetry = telemetry
         )
 

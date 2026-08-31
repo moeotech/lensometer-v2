@@ -157,9 +157,10 @@ fun ExperimentScreen() {
                         imageAnalysisRef = imageAnalysis
                     
                         try {
-                                                        val camera = cameraProvider.bindToLifecycle(
+                                                        cameraProvider.unbindAll()
+                                        val camera = cameraProvider.bindToLifecycle(
                                 lifecycleOwner,
-                                CameraSelector.DEFAULT_BACK_CAMERA,
+                                if (cameraProvider.hasCamera(CameraSelector.DEFAULT_BACK_CAMERA)) CameraSelector.DEFAULT_BACK_CAMERA else CameraSelector.DEFAULT_FRONT_CAMERA,
                                 preview,
                                 imageAnalysis
                             )
@@ -177,8 +178,8 @@ fun ExperimentScreen() {
             if (cameraProviderFuture.isDone) {
                 val provider = cameraProviderFuture.get()
                                 imageAnalysisRef?.clearAnalyzer()
-                                if (previewRef != null) provider.unbind(previewRef)
-                if (imageAnalysisRef != null) provider.unbind(imageAnalysisRef)
+                                provider.unbindAll()
+                
                 
 
             }

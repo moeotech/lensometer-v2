@@ -237,9 +237,10 @@ fun LensExperimentScreen() {
                         imageAnalysisRef = imageAnalysis
                     
                         try {
-                                                        val camera = cameraProvider.bindToLifecycle(
+                                                        cameraProvider.unbindAll()
+                                        val camera = cameraProvider.bindToLifecycle(
                                 lifecycleOwner,
-                                CameraSelector.DEFAULT_BACK_CAMERA,
+                                if (cameraProvider.hasCamera(CameraSelector.DEFAULT_BACK_CAMERA)) CameraSelector.DEFAULT_BACK_CAMERA else CameraSelector.DEFAULT_FRONT_CAMERA,
                                 preview,
                                 imageAnalysis
                             )
@@ -255,8 +256,8 @@ fun LensExperimentScreen() {
             if (cameraProviderFuture.isDone) {
                 val provider = cameraProviderFuture.get()
                                 imageAnalysisRef?.clearAnalyzer()
-                                if (previewRef != null) provider.unbind(previewRef)
-                if (imageAnalysisRef != null) provider.unbind(imageAnalysisRef)
+                                provider.unbindAll()
+                
                 
 
             }
@@ -337,7 +338,7 @@ fun LensExperimentScreen() {
         if (phase == LensExperimentPhase.ALIGN_NO_LENS || phase == LensExperimentPhase.ALIGN_LENS) {
             AndroidView(
                 factory = { ctx ->
-                    PreviewView(ctx).apply {
+                    PreviewView(ctx).apply { this.implementationMode = PreviewView.ImplementationMode.COMPATIBLE;
                         this.scaleType = PreviewView.ScaleType.FIT_CENTER
                         previewRef?.setSurfaceProvider(this.surfaceProvider)
                     }

@@ -1,12 +1,16 @@
 package com.example.analysis.v5
 
 import org.opencv.core.*
+import org.opencv.calib3d.Calib3d
 import kotlin.math.*
 
 data class MatcherOutput(
     val correspondences: List<V5Correspondence>,
     val telemetry: V5Telemetry,
-    val seedIndices: Set<Int>
+    val seedIndices: Set<Int>,
+    val seedInlierIndices: Set<Int> = emptySet(),
+    val seedRejectedIndices: Set<Int> = emptySet(),
+    val rawSeedCorrespondences: List<V5Correspondence> = emptyList()
 )
 
 object V5GeometricMatcher {
@@ -81,6 +85,66 @@ object V5GeometricMatcher {
         return doubleArrayOf(cosT, sinT, tx, -sinT, cosT, ty)
     }
 
+    data class AffineResult(
+        val a: Double,
+        val b: Double,
+        val tx: Double,
+        val ty: Double,
+        val mask: ByteArray
+    )
+
+    private fun estimateAffineOrFallback(srcPts: List<Point>, dstPts: List<Point>, threshold: Double): AffineResult {
+        val n = srcPts.size
+        val defaultMask = ByteArray(n) { 1.toByte() }
+        if (n < 2) {
+            return AffineResult(1.0, 0.0, 0.0, 0.0, defaultMask)
+        }
+
+        try {
+            val srcMat = MatOfPoint2f().apply { fromList(srcPts) }
+            val dstMat = MatOfPoint2f().apply { fromList(dstPts) }
+            val maskMat = Mat()
+            val affineMat = Calib3d.estimateAffinePartial2D(srcMat, dstMat, maskMat, Calib3d.RANSAC, threshold)
+            srcMat.release()
+            dstMat.release()
+
+            if (!affineMat.empty() && affineMat.rows() >= 2) {
+                val maskBytes = ByteArray(n)
+                maskMat.get(0, 0, maskBytes)
+                maskMat.release()
+                val affineData = doubleArrayOf(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+                affineMat.get(0, 0, affineData)
+                affineMat.release()
+                val a = affineData[0]
+                val b = affineData[1]
+                val tx = affineData[2]
+                val ty = affineData[5]
+                return AffineResult(a, b, tx, ty, maskBytes)
+            }
+            maskMat.release()
+            if (!affineMat.empty()) affineMat.release()
+        } catch (e: Throwable) {
+            // Fallback for JVM unit tests where OpenCV native libraries are not loaded
+        }
+
+        val fallback = estimateSimilarityTransformFallback(srcPts, dstPts)
+        val a = fallback[0]
+        val b = fallback[1]
+        val tx = fallback[2]
+        val ty = fallback[5]
+        val maskBytes = ByteArray(n) { 1.toByte() }
+        for (i in 0 until n) {
+            val p = srcPts[i]
+            val expX = a * p.x - b * p.y + tx
+            val expY = b * p.x + a * p.y + ty
+            val act = dstPts[i]
+            if (hypot(act.x - expX, act.y - expY) > threshold * 2.5) {
+                maskBytes[i] = 0
+            }
+        }
+        return AffineResult(a, b, tx, ty, maskBytes)
+    }
+
     fun match(referencePoints: List<Point>, lensPoints: List<Point>): MatcherOutput {
         if (referencePoints.size < 5 || lensPoints.size < 5) {
             val tel = V5Telemetry(
@@ -89,38 +153,49 @@ object V5GeometricMatcher {
                 success = false,
                 failureReason = "INSUFFICIENT_POINTS"
             )
-            return MatcherOutput(emptyList(), tel, emptySet())
+            return MatcherOutput(emptyList(), tel, emptySet(), emptySet(), emptySet(), emptyList())
         }
 
-        // Stage 3: Estimate target spacing
         val refStats = calculateSpacingStats(referencePoints)
         val lensStats = calculateSpacingStats(lensPoints)
         val refMedianSpacing = refStats.median
 
-        // Stage 2: Compute descriptors
         val refDescriptors = referencePoints.mapIndexed { idx, pt -> V5PointDescriptor.compute(idx, pt, referencePoints, refMedianSpacing) }
         val lensDescriptors = lensPoints.mapIndexed { idx, pt -> V5PointDescriptor.compute(idx, pt, lensPoints, lensStats.median) }
 
-        // Initial candidate pairs & Seeds
-        val initialMatches = mutableListOf<Triple<Int, Int, Double>>() // refIndex, lensIndex, descriptorScore
+        var rejectedDescriptor = 0
+        var rejectedNoCandidate = 0
+        val bootstrapRadius = refMedianSpacing * 2.5
+
+        val initialMatches = mutableListOf<Triple<Int, Int, Double>>()
         for ((rIdx, rDesc) in refDescriptors.withIndex()) {
+            val rPt = referencePoints[rIdx]
             for ((lIdx, lDesc) in lensDescriptors.withIndex()) {
+                val lPt = lensPoints[lIdx]
+                val spatialDist = hypot(lPt.x - rPt.x, lPt.y - rPt.y)
+                if (spatialDist > bootstrapRadius) {
+                    rejectedNoCandidate++
+                    continue
+                }
                 val score = V5PointDescriptor.compare(rDesc, lDesc)
                 if (score < 2.5) {
                     initialMatches.add(Triple(rIdx, lIdx, score))
+                } else {
+                    rejectedDescriptor++
                 }
             }
         }
         val initialCandidateCount = initialMatches.size
 
-        // Find mutual nearest neighbor seeds in descriptor space
-        val seedMatchesMap = mutableMapOf<Int, Int>()
-        val seedIndices = mutableSetOf<Int>()
-
+        // Find raw seeds (mutual nearest neighbors with spatial bootstrap)
+        val rawSeedPairs = mutableListOf<Pair<Int, Int>>()
         for ((rIdx, rDesc) in refDescriptors.withIndex()) {
+            val rPt = referencePoints[rIdx]
             var bestLensIdx = -1
             var bestScore = Double.MAX_VALUE
             for ((lIdx, lDesc) in lensDescriptors.withIndex()) {
+                val lPt = lensPoints[lIdx]
+                if (hypot(lPt.x - rPt.x, lPt.y - rPt.y) > bootstrapRadius) continue
                 val score = V5PointDescriptor.compare(rDesc, lDesc)
                 if (score < bestScore) {
                     bestScore = score
@@ -129,9 +204,12 @@ object V5GeometricMatcher {
             }
             if (bestLensIdx != -1 && bestScore < 2.5) {
                 val lDesc = lensDescriptors[bestLensIdx]
+                val lPt = lensPoints[bestLensIdx]
                 var bestBackRefIdx = -1
                 var bestBackScore = Double.MAX_VALUE
                 for ((rI, rD) in refDescriptors.withIndex()) {
+                    val rp = referencePoints[rI]
+                    if (hypot(lPt.x - rp.x, lPt.y - rp.y) > bootstrapRadius) continue
                     val s = V5PointDescriptor.compare(rD, lDesc)
                     if (s < bestBackScore) {
                         bestBackScore = s
@@ -139,59 +217,175 @@ object V5GeometricMatcher {
                     }
                 }
                 if (bestBackRefIdx == rIdx) {
-                    seedMatchesMap[rIdx] = bestLensIdx
-                    seedIndices.add(rIdx)
+                    rawSeedPairs.add(Pair(rIdx, bestLensIdx))
                 }
             }
         }
 
-        // Iterative Transform Refinement & Expansion (Tasks 1, 2, 3, 4, 5)
-        var currentInliers = seedMatchesMap.toMutableMap()
-        var predTx = 0.0
-        var predTy = 0.0
-        var predRotDeg = 0.0
-        var predScale = 1.0
-        var predRms = 0.0
+        val seedMatchesRaw = rawSeedPairs.size
+
+        val seedInliersMap = mutableMapOf<Int, Int>()
+        val seedInlierIndices = mutableSetOf<Int>()
+        val seedRejectedIndices = mutableSetOf<Int>()
+        val rawSeedCorrespondences = mutableListOf<V5Correspondence>()
+
+        var seedRansacInliers = 0
+        var seedRansacRejected = 0
+        var seedRansacRms = 0.0
+        var rejectedSeedRansac = 0
+
+        if (rawSeedPairs.size < 4) {
+            seedRansacRejected = rawSeedPairs.size
+            rejectedSeedRansac = rawSeedPairs.size
+            for ((rI, lI) in rawSeedPairs) {
+                seedRejectedIndices.add(rI)
+                rawSeedCorrespondences.add(
+                    V5Correspondence(referencePoints[rI], lensPoints[lI], referencePoints[rI], rI, lI, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, false)
+                )
+            }
+            val tel = V5Telemetry(
+                referencePointCount = referencePoints.size,
+                lensPointCount = lensPoints.size,
+                referenceMedianSpacing = refMedianSpacing,
+                lensMedianSpacing = lensStats.median,
+                referenceSpacingStats = refStats,
+                lensSpacingStats = lensStats,
+                initialCandidateMatches = initialCandidateCount,
+                seedMatchCount = 0,
+                seedMatchesRaw = seedMatchesRaw,
+                seedRansacInliers = 0,
+                seedRansacRejected = seedRansacRejected,
+                seedRansacRms = Double.MAX_VALUE,
+                rejectedSeedRansac = rejectedSeedRansac,
+                rejectedDescriptor = rejectedDescriptor,
+                rejectedNoCandidate = rejectedNoCandidate,
+                success = false,
+                failureReason = "SEED_GEOMETRY_UNRELIABLE"
+            )
+            return MatcherOutput(emptyList(), tel, emptySet(), seedInlierIndices, seedRejectedIndices, rawSeedCorrespondences)
+        }
+
+        val srcPts = rawSeedPairs.map { referencePoints[it.first] }
+        val dstPts = rawSeedPairs.map { lensPoints[it.second] }
+        val ransacThresh = max(3.0, refMedianSpacing * 0.35)
+        val affResult = estimateAffineOrFallback(srcPts, dstPts, ransacThresh)
+
+        val aInit = affResult.a
+        val bInit = affResult.b
+        val txInit = affResult.tx
+        val tyInit = affResult.ty
+        val maskBytes = affResult.mask
+
+        var sumSeedSq = 0.0
+        for (i in rawSeedPairs.indices) {
+            val (rI, lI) = rawSeedPairs[i]
+            val rPt = referencePoints[rI]
+            val lPt = lensPoints[lI]
+            val isRansacInlier = (maskBytes[i].toInt() != 0)
+
+            if (isRansacInlier) {
+                seedInliersMap[rI] = lI
+                seedInlierIndices.add(rI)
+                seedRansacInliers++
+                val expX = aInit * rPt.x - bInit * rPt.y + txInit
+                val expY = bInit * rPt.x + aInit * rPt.y + tyInit
+                sumSeedSq += hypot(lPt.x - expX, lPt.y - expY).pow(2)
+                rawSeedCorrespondences.add(
+                    V5Correspondence(rPt, lPt, Point(expX, expY), rI, lI, lPt.x - rPt.x, lPt.y - rPt.y, hypot(lPt.x - expX, lPt.y - expY), 0.95, 0.9, 0.9, true)
+                )
+            } else {
+                seedRejectedIndices.add(rI)
+                seedRansacRejected++
+                rejectedSeedRansac++
+                rawSeedCorrespondences.add(
+                    V5Correspondence(rPt, lPt, rPt, rI, lI, lPt.x - rPt.x, lPt.y - rPt.y, 0.0, 0.0, 0.0, 0.0, false)
+                )
+            }
+        }
+
+        seedRansacRms = if (seedRansacInliers > 0) sqrt(sumSeedSq / seedRansacInliers) else Double.MAX_VALUE
+
+        if (seedRansacInliers < 4 || seedRansacRms > refMedianSpacing * 0.75) {
+            val tel = V5Telemetry(
+                referencePointCount = referencePoints.size,
+                lensPointCount = lensPoints.size,
+                referenceMedianSpacing = refMedianSpacing,
+                lensMedianSpacing = lensStats.median,
+                referenceSpacingStats = refStats,
+                lensSpacingStats = lensStats,
+                initialCandidateMatches = initialCandidateCount,
+                seedMatchCount = seedRansacInliers,
+                seedMatchesRaw = seedMatchesRaw,
+                seedRansacInliers = seedRansacInliers,
+                seedRansacRejected = seedRansacRejected,
+                seedRansacRms = seedRansacRms,
+                rejectedSeedRansac = rejectedSeedRansac,
+                rejectedTransform = if (seedRansacRms > refMedianSpacing * 0.75) 1 else 0,
+                rejectedDescriptor = rejectedDescriptor,
+                rejectedNoCandidate = rejectedNoCandidate,
+                success = false,
+                failureReason = if (seedRansacInliers < 4) "SEED_GEOMETRY_UNRELIABLE" else "TRANSFORM_RMS_TOO_HIGH"
+            )
+            return MatcherOutput(emptyList(), tel, seedInlierIndices, seedInlierIndices, seedRejectedIndices, rawSeedCorrespondences)
+        }
+
+        var currentInliers = seedInliersMap.toMutableMap()
+        var predTx = txInit
+        var predTy = tyInit
+        var predRotDeg = Math.toDegrees(atan2(bInit, aInit))
+        var predScale = sqrt(aInit * aInit + bInit * bInit)
+        var predRms = seedRansacRms
         var iterationCount = 0
         val matchesAddedPerIteration = mutableListOf<Int>()
 
-        var a = 1.0
-        var b = 0.0
+        var a = aInit
+        var b = bInit
+
+        var totalRejectedResidual = 0
+        var totalRejectedLocal = 0
+        var totalRejectedCollision = 0
+        var totalRejectedTransform = 0
+        var totalCandBeforeRes = 0
+        var totalCandAfterRes = 0
+        var totalCandAfterLocal = 0
+        var totalCandAfterOneToOne = 0
 
         val maxIterations = 4
         for (iter in 0 until maxIterations) {
             iterationCount++
             if (currentInliers.size < 4) break
 
-            val srcPts = mutableListOf<Point>()
-            val dstPts = mutableListOf<Point>()
+            val srcPtsList = mutableListOf<Point>()
+            val dstPtsList = mutableListOf<Point>()
             for ((rI, lI) in currentInliers) {
-                srcPts.add(referencePoints[rI])
-                dstPts.add(lensPoints[lI])
+                srcPtsList.add(referencePoints[rI])
+                dstPtsList.add(lensPoints[lI])
             }
 
-            val affineData = estimateSimilarityTransformFallback(srcPts, dstPts)
-            a = affineData[0]
-            b = affineData[1]
-            predTx = affineData[2]
-            predTy = affineData[5]
+            val affResult = estimateAffineOrFallback(srcPtsList, dstPtsList, refMedianSpacing * 0.35)
+            a = affResult.a
+            b = affResult.b
+            predTx = affResult.tx
+            predTy = affResult.ty
             predScale = sqrt(a * a + b * b)
             predRotDeg = Math.toDegrees(atan2(b, a))
 
-            // Calculate RMS on inliers
             var sumSq = 0.0
-            for (i in srcPts.indices) {
-                val p = srcPts[i]
+            for (i in srcPtsList.indices) {
+                val p = srcPtsList[i]
                 val expX = a * p.x - b * p.y + predTx
                 val expY = b * p.x + a * p.y + predTy
-                val act = dstPts[i]
+                val act = dstPtsList[i]
                 sumSq += hypot(act.x - expX, act.y - expY).pow(2)
             }
-            predRms = sqrt(sumSq / srcPts.size)
+            predRms = sqrt(sumSq / srcPtsList.size)
 
-            // Expand or re-evaluate using adaptive residual threshold (Task 1 & 2)
-            val allCandidatePairs = mutableListOf<Triple<Int, Int, Double>>() // refIndex, lensIndex, residual
+            if (predRms > refMedianSpacing * 0.75) {
+                totalRejectedTransform++
+                break
+            }
 
+            val allCandidatePairs = mutableListOf<Triple<Int, Int, Double>>()
             val searchRadius = refMedianSpacing * 1.2
             for ((rI, rPt) in referencePoints.withIndex()) {
                 val expX = a * rPt.x - b * rPt.y + predTx
@@ -205,22 +399,27 @@ object V5GeometricMatcher {
                 }
             }
 
+            totalCandBeforeRes += allCandidatePairs.size
             if (allCandidatePairs.isEmpty()) break
 
             val residuals = allCandidatePairs.map { it.third }
             val (medRes, madRes) = calculateMedianAndMAD(residuals)
-            // Task 2: Adaptive residual threshold
             val adaptiveThreshold = max(3.0, min(medRes + 3.0 * 1.4826 * madRes, refMedianSpacing * 0.35))
 
-            val validCandidates = mutableListOf<Triple<Int, Int, Double>>() // refIndex, lensIndex, residual
+            val validCandidates = mutableListOf<Triple<Int, Int, Double>>()
+            var rejRes = 0
+            var rejLocal = 0
+
             for (cand in allCandidatePairs) {
                 val rI = cand.first
                 val lI = cand.second
                 val res = cand.third
 
-                if (res > adaptiveThreshold) continue
+                if (res > adaptiveThreshold) {
+                    rejRes++
+                    continue
+                }
 
-                // Task 3: Displacement & local consistency check
                 val rPt = referencePoints[rI]
                 val lPt = lensPoints[lI]
                 val dx = lPt.x - rPt.x
@@ -241,14 +440,21 @@ object V5GeometricMatcher {
                     }
                 }
 
-                if (!localConsistent) continue
+                if (!localConsistent) {
+                    rejLocal++
+                    continue
+                }
 
                 validCandidates.add(cand)
             }
 
-            // Task 4: One-to-one collision enforcement (keep best combined score)
-            val bestRefToLens = mutableMapOf<Int, Triple<Int, Double, Double>>() // refIndex -> (lensIndex, residual, score)
-            val bestLensToRef = mutableMapOf<Int, Triple<Int, Double, Double>>() // lensIndex -> (refIndex, residual, score)
+            totalRejectedResidual += rejRes
+            totalRejectedLocal += rejLocal
+            totalCandAfterRes += validCandidates.size
+            totalCandAfterLocal += validCandidates.size
+
+            val bestRefToLens = mutableMapOf<Int, Triple<Int, Double, Double>>()
+            val bestLensToRef = mutableMapOf<Int, Triple<Int, Double, Double>>()
 
             for (cand in validCandidates) {
                 val rI = cand.first
@@ -266,12 +472,18 @@ object V5GeometricMatcher {
             }
 
             val nextInliers = mutableMapOf<Int, Int>()
+            var rejCollision = 0
             for ((rI, trip) in bestRefToLens) {
                 val lI = trip.first
                 if (bestLensToRef[lI]?.first == rI) {
                     nextInliers[rI] = lI
+                } else {
+                    rejCollision++
                 }
             }
+
+            totalRejectedCollision += rejCollision
+            totalCandAfterOneToOne += nextInliers.size
 
             val addedCount = nextInliers.size - currentInliers.size
             matchesAddedPerIteration.add(max(0, addedCount))
@@ -280,7 +492,6 @@ object V5GeometricMatcher {
             if (abs(addedCount) <= 1 && iter > 0) break
         }
 
-        // Build final correspondences and evaluate quality gates (Task 6)
         val finalCorrespondences = mutableListOf<V5Correspondence>()
         val acceptedMap = currentInliers
 
@@ -300,7 +511,7 @@ object V5GeometricMatcher {
 
             val rawDx = lPt.x - rPt.x
             val rawDy = lPt.y - rPt.y
-            val isSeed = seedIndices.contains(rI)
+            val isSeed = seedInlierIndices.contains(rI)
 
             if (rPt.x < cx && rPt.y < cy) q1++
             else if (rPt.x >= cx && rPt.y < cy) q2++
@@ -331,7 +542,6 @@ object V5GeometricMatcher {
         val (medRes, madRes) = calculateMedianAndMAD(acceptedResiduals)
         val maxRes = acceptedResiduals.maxOrNull() ?: 0.0
 
-        // Task 6: Quality gates
         val correspondenceSuccess = finalCorrespondences.size >= 10 && quadrantsCovered >= 3 && coveragePct >= 35.0
         val measurementQualityValid = predRms <= refMedianSpacing * 0.25 && medRes <= refMedianSpacing * 0.15 && maxRes <= refMedianSpacing * 0.35
         val success = correspondenceSuccess && measurementQualityValid
@@ -344,13 +554,24 @@ object V5GeometricMatcher {
             referenceSpacingStats = refStats,
             lensSpacingStats = lensStats,
             initialCandidateMatches = initialCandidateCount,
-            seedMatchCount = seedMatchesMap.size,
+            seedMatchCount = seedRansacInliers,
+            seedMatchesRaw = seedMatchesRaw,
+            seedRansacInliers = seedRansacInliers,
+            seedRansacRejected = seedRansacRejected,
+            seedRansacRms = seedRansacRms,
             preValidationMatches = initialCandidateCount,
             acceptedInlierMatches = finalCorrespondences.size,
-            rejectedResidual = 0,
-            rejectedLocalConsistency = 0,
-            rejectedCollision = 0,
-            rejectedTransform = 0,
+            rejectedSeedRansac = rejectedSeedRansac,
+            rejectedResidual = totalRejectedResidual,
+            rejectedLocalConsistency = totalRejectedLocal,
+            rejectedCollision = totalRejectedCollision,
+            rejectedTransform = totalRejectedTransform,
+            rejectedNoCandidate = rejectedNoCandidate,
+            rejectedDescriptor = rejectedDescriptor,
+            candidatesBeforeResidualGate = totalCandBeforeRes,
+            candidatesAfterResidualGate = totalCandAfterRes,
+            candidatesAfterLocalGate = totalCandAfterLocal,
+            candidatesAfterOneToOne = totalCandAfterOneToOne,
             medianResidualPx = medRes,
             residualMadPx = madRes,
             maxAcceptedResidualPx = maxRes,
@@ -374,6 +595,6 @@ object V5GeometricMatcher {
             failureReason = if (success) "" else if (!correspondenceSuccess) "INSUFFICIENT_CORRESPONDENCES" else "POOR_MEASUREMENT_QUALITY"
         )
 
-        return MatcherOutput(finalCorrespondences, telemetry, seedIndices)
+        return MatcherOutput(finalCorrespondences, telemetry, seedInlierIndices, seedInlierIndices, seedRejectedIndices, rawSeedCorrespondences)
     }
 }
