@@ -112,7 +112,37 @@ data class V4RunResult(
     val tensorA21: Double = 0.0,
     val tensorA22: Double = 0.0,
     val antisymmetricMag: Double = 0.0,
-    val axisConfidence: Double = 0.0
+    val axisConfidence: Double = 0.0,
+
+    val totalReferenceDots: Int = 0,
+    val totalLensDots: Int = 0,
+    val topologyInputReferenceDots: Int = 0,
+    val topologyInputLensDots: Int = 0,
+    val topologyAssignedReferenceDots: Int = 0,
+    val topologyAssignedLensDots: Int = 0,
+    val topologyUnassignedReferenceDots: Int = 0,
+    val topologyUnassignedLensDots: Int = 0,
+    val topologyCollisionsReference: Int = 0,
+    val topologyCollisionsLens: Int = 0,
+    val topologyConsistencyErrorsReference: Int = 0,
+    val topologyConsistencyErrorsLens: Int = 0,
+    val seedReferenceCandidates: Int = 0,
+    val seedLensCandidates: Int = 0,
+    val mutualNearestNeighborMatches: Int = 0,
+    val rejectedByDistance: Int = 0,
+    val rejectedByNonMutual: Int = 0,
+    val rejectedByTopology: Int = 0,
+    val rejectedByDuplicateAssignment: Int = 0,
+    val rejectedByGeometricConsistency: Int = 0,
+    val neighborExpandedMatches: Int = 0,
+    val affineExpandedMatches: Int = 0,
+    val finalOneToOneMatches: Int = 0,
+    val q1Matches: Int = 0,
+    val q2Matches: Int = 0,
+    val q3Matches: Int = 0,
+    val q4Matches: Int = 0,
+    val acceptedReferencePoints: List<Point> = emptyList(),
+    val acceptedObservedPoints: List<Point> = emptyList()
 )
 
 data class V4Result(
@@ -512,18 +542,55 @@ object V4OpticalAnalyzer {
         
         try {
             val refAgg = aggregateFrames(noLensFrames)
-            if (!refAgg.success) {
-                return@withContext V4RunResult(success = false, errorMessage = "Ref aggregation failed: ${refAgg.errorMessage}")
-            }
             val baseRefPoints = refAgg.points
             
             val lensAgg = aggregateFrames(withLensFrames)
-            if (!lensAgg.success) {
-                return@withContext V4RunResult(success = false, errorMessage = "Lens aggregation failed: ${lensAgg.errorMessage}")
-            }
             val baseLensPoints = lensAgg.points
             
             val spacing = estimateSpacing(baseRefPoints)
+            
+            val refRejections = mutableMapOf<String, Int>()
+            val gridMap = assignGridTopology(baseRefPoints, spacing, refRejections)
+            val lensRejections = mutableMapOf<String, Int>()
+            assignGridTopology(baseLensPoints, spacing, lensRejections)
+
+            if (!refAgg.success) {
+                return@withContext V4RunResult(
+                    success = false,
+                    errorMessage = "Ref aggregation failed: ${refAgg.errorMessage}",
+                    totalReferenceDots = baseRefPoints.size,
+                    totalLensDots = baseLensPoints.size,
+                    topologyInputReferenceDots = baseRefPoints.size,
+                    topologyInputLensDots = baseLensPoints.size,
+                    topologyAssignedReferenceDots = refRejections["topologyAssignedDots"] ?: 0,
+                    topologyAssignedLensDots = lensRejections["topologyAssignedDots"] ?: 0,
+                    topologyUnassignedReferenceDots = refRejections["topologyUnassignedDots"] ?: 0,
+                    topologyUnassignedLensDots = lensRejections["topologyUnassignedDots"] ?: 0,
+                    topologyCollisionsReference = refRejections["topologyCollisions"] ?: 0,
+                    topologyCollisionsLens = lensRejections["topologyCollisions"] ?: 0,
+                    topologyConsistencyErrorsReference = refRejections["topologyConsistencyErrors"] ?: 0,
+                    topologyConsistencyErrorsLens = lensRejections["topologyConsistencyErrors"] ?: 0
+                )
+            }
+            
+            if (!lensAgg.success) {
+                return@withContext V4RunResult(
+                    success = false,
+                    errorMessage = "Lens aggregation failed: ${lensAgg.errorMessage}",
+                    totalReferenceDots = baseRefPoints.size,
+                    totalLensDots = baseLensPoints.size,
+                    topologyInputReferenceDots = baseRefPoints.size,
+                    topologyInputLensDots = baseLensPoints.size,
+                    topologyAssignedReferenceDots = refRejections["topologyAssignedDots"] ?: 0,
+                    topologyAssignedLensDots = lensRejections["topologyAssignedDots"] ?: 0,
+                    topologyUnassignedReferenceDots = refRejections["topologyUnassignedDots"] ?: 0,
+                    topologyUnassignedLensDots = lensRejections["topologyUnassignedDots"] ?: 0,
+                    topologyCollisionsReference = refRejections["topologyCollisions"] ?: 0,
+                    topologyCollisionsLens = lensRejections["topologyCollisionsLens"] ?: 0,
+                    topologyConsistencyErrorsReference = refRejections["topologyConsistencyErrors"] ?: 0,
+                    topologyConsistencyErrorsLens = lensRejections["topologyConsistencyErrors"] ?: 0
+                )
+            }
             
             val rejections = mutableMapOf(
                 "geometric_gate" to 0,
@@ -538,8 +605,6 @@ object V4OpticalAnalyzer {
             
             val w = noLensFrames[0].width.toDouble()
             val h = noLensFrames[0].height.toDouble()
-            
-            val gridMap = assignGridTopology(baseRefPoints, spacing, rejections)
 
             val binSize = spacing * 0.2
             val histogram = HashMap<Pair<Int, Int>, Int>()
@@ -805,7 +870,40 @@ object V4OpticalAnalyzer {
                     success = false, 
                     errorMessage = "INSUFFICIENT SPATIAL CORRESPONDENCE (Matches: ${candidateRef.size}, Quads: $quads, Coverage: ${String.format("%.1f", coverage*100)}%)",
                     measurementQualityPass = false,
-                    qualityMessage = "INSUFFICIENT SPATIAL CORRESPONDENCE"
+                    qualityMessage = "INSUFFICIENT SPATIAL CORRESPONDENCE",
+                    totalReferenceDots = baseRefPoints.size,
+                    totalLensDots = baseLensPoints.size,
+                    topologyInputReferenceDots = baseRefPoints.size,
+                    topologyInputLensDots = baseLensPoints.size,
+                    topologyAssignedReferenceDots = refRejections["topologyAssignedDots"] ?: 0,
+                    topologyAssignedLensDots = lensRejections["topologyAssignedDots"] ?: 0,
+                    topologyUnassignedReferenceDots = refRejections["topologyUnassignedDots"] ?: 0,
+                    topologyUnassignedLensDots = lensRejections["topologyUnassignedDots"] ?: 0,
+                    topologyCollisionsReference = refRejections["topologyCollisions"] ?: 0,
+                    topologyCollisionsLens = lensRejections["topologyCollisionsLens"] ?: 0,
+                    topologyConsistencyErrorsReference = refRejections["topologyConsistencyErrors"] ?: 0,
+                    topologyConsistencyErrorsLens = lensRejections["topologyConsistencyErrorsLens"] ?: 0,
+                    seedReferenceCandidates = gridMap.size,
+                    seedLensCandidates = baseLensPoints.size,
+                    mutualNearestNeighborMatches = rejections["seedMutualMatches"] ?: 0,
+                    rejectedByDistance = seedDistanceRejects,
+                    rejectedByNonMutual = nonMutualCount,
+                    rejectedByTopology = rejectedRefs.size,
+                    rejectedByDuplicateAssignment = assignmentConflicts,
+                    rejectedByGeometricConsistency = rejections["ransac_rejection"] ?: 0,
+                    neighborExpandedMatches = rejections["neighborExpandedMatches"] ?: 0,
+                    affineExpandedMatches = rejections["affineExpandedMatches"] ?: 0,
+                    finalOneToOneMatches = finalMatches.size,
+                    q1Matches = q1,
+                    q2Matches = q2,
+                    q3Matches = q3,
+                    q4Matches = q4,
+                    quadrantCoverage = quads,
+                    spatialCoveragePct = coverage * 100.0,
+                    rejectedReferencePoints = rejectedRefs,
+                    unmatchedLensPoints = unmatchedLens,
+                    acceptedReferencePoints = candidateRef,
+                    acceptedObservedPoints = candidateLens
                 )
             }
             
