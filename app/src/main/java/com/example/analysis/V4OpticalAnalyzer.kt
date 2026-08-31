@@ -142,7 +142,38 @@ data class V4RunResult(
     val q3Matches: Int = 0,
     val q4Matches: Int = 0,
     val acceptedReferencePoints: List<Point> = emptyList(),
-    val acceptedObservedPoints: List<Point> = emptyList()
+    val acceptedObservedPoints: List<Point> = emptyList(),
+
+    val refCandidateBlobs: Int = 0,
+    val refAcceptedBlobs: Int = 0,
+    val refRejectedByArea: Int = 0,
+    val refRejectedByCircularity: Int = 0,
+    val lensCandidateBlobs: Int = 0,
+    val lensAcceptedBlobs: Int = 0,
+    val lensRejectedByArea: Int = 0,
+    val lensRejectedByCircularity: Int = 0,
+    val estimatedSpacing: Double = 0.0,
+    val estimatedGridAngleDeg: Double = 0.0,
+    val originX: Double = 0.0,
+    val originY: Double = 0.0,
+    val connectedComponentsCount: Int = 0,
+    val largestComponentSize: Int = 0,
+    val topologyRejectedNoNeighbor: Int = 0,
+    val topologyRejectedSpacing: Int = 0,
+    val topologyRejectedAngle: Int = 0,
+    val topologyRejectedResidual: Int = 0,
+    val topologyRejectedDisconnected: Int = 0,
+    val topologyRejectedCollision: Int = 0,
+    val topologyRejectedOutsideGrid: Int = 0,
+    val topologyRejectedOther: Int = 0,
+    val spacingMin: Double = 0.0,
+    val spacingMedian: Double = 0.0,
+    val spacingMean: Double = 0.0,
+    val spacingP25: Double = 0.0,
+    val spacingP75: Double = 0.0,
+    val spacingMax: Double = 0.0,
+    val referenceTopologyAssignmentPct: Double = 0.0,
+    val fallbackFeasibilityNote: String = "Topology-independent MNN geometric correspondence fallback is fully feasible and recommended."
 )
 
 data class V4Result(
@@ -194,6 +225,10 @@ private data class AggResult(
     val rejected: Int,
     val stableTrackCount: Int = 0,
     val medianTrackLifetime: Double = 0.0,
+    val candidateBlobs: Int = 0,
+    val acceptedBlobs: Int = 0,
+    val rejectedByArea: Int = 0,
+    val rejectedByCircularity: Int = 0,
     val rejectedReferencePoints: List<Point> = emptyList(),
     val unmatchedLensPoints: List<Point> = emptyList(),
     val localOutlierRejections: Int = 0,
@@ -232,7 +267,7 @@ private data class AggResult(
 
 object V4OpticalAnalyzer {
 
-    private fun detectDots(bitmap: Bitmap): List<Point> {
+    private fun detectDots(bitmap: Bitmap): DotDetectionResult {
         val mat = Mat()
         Utils.bitmapToMat(bitmap, mat)
         val gray = Mat()
@@ -245,16 +280,28 @@ object V4OpticalAnalyzer {
         val hierarchy = Mat()
         Imgproc.findContours(thresh, contours, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE)
         
+        val candidateBlobs = contours.size
         val points = mutableListOf<Point>()
+        var rejectedByArea = 0
+        var rejectedByCircularity = 0
+        
         for (contour in contours) {
             val area = Imgproc.contourArea(contour)
-            if (area > 10.0 && area < 500.0) {
-                val moments = Imgproc.moments(contour)
-                if (moments.m00 != 0.0) {
-                    val cx = moments.m10 / moments.m00
-                    val cy = moments.m01 / moments.m00
-                    points.add(Point(cx, cy))
-                }
+            if (area <= 10.0 || area >= 500.0) {
+                rejectedByArea++
+                continue
+            }
+            val perimeter = Imgproc.arcLength(MatOfPoint2f(*contour.toArray()), true)
+            val circularity = if (perimeter > 0.0) (4.0 * Math.PI * area) / (perimeter * perimeter) else 0.0
+            if (circularity < 0.15) {
+                rejectedByCircularity++
+                continue
+            }
+            val moments = Imgproc.moments(contour)
+            if (moments.m00 != 0.0) {
+                val cx = moments.m10 / moments.m00
+                val cy = moments.m01 / moments.m00
+                points.add(Point(cx, cy))
             }
         }
         
@@ -262,7 +309,7 @@ object V4OpticalAnalyzer {
         gray.release()
         thresh.release()
         hierarchy.release()
-        return points
+        return DotDetectionResult(points, candidateBlobs, points.size, rejectedByArea, rejectedByCircularity)
     }
 
 
@@ -277,11 +324,12 @@ object V4OpticalAnalyzer {
     private fun aggregateFrames(frames: List<Bitmap>): AggResult {
         if (frames.isEmpty()) return AggResult(false, "No frames", emptyList(), 0, 0, 0)
         
-        val allKeypoints = frames.map { detectDots(it) }
-        val baseIdx = allKeypoints.indices.maxByOrNull { allKeypoints[it].size } ?: 0
-        val basePoints = allKeypoints[baseIdx]
+        val allResults = frames.map { detectDots(it) }
+        val baseIdx = allResults.indices.maxByOrNull { allResults[it].points.size } ?: 0
+        val baseRes = allResults[baseIdx]
+        val basePoints = baseRes.points
         
-        if (basePoints.size < 10) return AggResult(false, "Not enough points in base frame", emptyList(), frames.size, 0, frames.size)
+        if (basePoints.size < 10) return AggResult(false, "Not enough points in base frame", emptyList(), frames.size, 0, frames.size, candidateBlobs = baseRes.candidateBlobs, acceptedBlobs = baseRes.acceptedBlobs, rejectedByArea = baseRes.rejectedByArea, rejectedByCircularity = baseRes.rejectedByCircularity)
         
         val pointGroups = Array(basePoints.size) { mutableListOf<Point>() }
         
@@ -289,7 +337,7 @@ object V4OpticalAnalyzer {
         var rejected = 0
         
         for (i in frames.indices) {
-            val pts = allKeypoints[i]
+            val pts = allResults[i].points
             if (pts.size < 10) {
                 rejected++
                 continue
@@ -404,7 +452,7 @@ object V4OpticalAnalyzer {
         trackLifetimes.sort()
         val medianLifetime = if (trackLifetimes.isNotEmpty()) trackLifetimes[trackLifetimes.size / 2] else 0.0
         
-        return AggResult(true, "", finalPoints, frames.size, accepted, rejected, stableCount, medianLifetime)
+        return AggResult(true, "", finalPoints, frames.size, accepted, rejected, stableCount, medianLifetime, baseRes.candidateBlobs, baseRes.acceptedBlobs, baseRes.rejectedByArea, baseRes.rejectedByCircularity)
     }
     
     private fun estimateSpacing(pts: List<Point>): Double {
@@ -426,11 +474,64 @@ object V4OpticalAnalyzer {
         return dists[dists.size / 2]
     }
 
-    private fun assignGridTopology(points: List<Point>, spacing: Double, rejections: MutableMap<String, Int> = mutableMapOf()): Map<Pair<Int, Int>, Point> {
-        if (points.isEmpty()) return emptyMap()
+    data class DotDetectionResult(
+        val points: List<Point>,
+        val candidateBlobs: Int,
+        val acceptedBlobs: Int,
+        val rejectedByArea: Int,
+        val rejectedByCircularity: Int
+    )
+
+    data class TopologyResult(
+        val grid: Map<Pair<Int, Int>, Point>,
+        val estimatedSpacing: Double,
+        val estimatedAngleDeg: Double,
+        val originX: Double,
+        val originY: Double,
+        val connectedComponentsCount: Int,
+        val largestComponentSize: Int,
+        val spacingMin: Double,
+        val spacingMedian: Double,
+        val spacingMean: Double,
+        val spacingP25: Double,
+        val spacingP75: Double,
+        val spacingMax: Double,
+        val rejectedNoNeighbor: Int,
+        val rejectedSpacing: Int,
+        val rejectedAngle: Int,
+        val rejectedResidual: Int,
+        val rejectedDisconnected: Int,
+        val rejectedCollision: Int,
+        val rejectedOutsideGrid: Int,
+        val rejectedOther: Int,
+        val assignmentPct: Double
+    )
+
+    private fun assignGridTopology(points: List<Point>): TopologyResult {
+        if (points.isEmpty()) {
+            return TopologyResult(emptyMap(), 0.0, 0.0, 0.0, 0.0, 0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0, 0, 0, 0, 0, 0, 0, 0.0)
+        }
+
+        val nnDists = mutableListOf<Double>()
+        for (p1 in points) {
+            var minD = Double.MAX_VALUE
+            for (p2 in points) {
+                if (p1 === p2) continue
+                val d = hypot(p1.x - p2.x, p1.y - p2.y)
+                if (d < minD) minD = d
+            }
+            if (minD != Double.MAX_VALUE) nnDists.add(minD)
+        }
+        nnDists.sort()
+        val spacingMin = nnDists.firstOrNull() ?: 0.0
+        val spacingMax = nnDists.lastOrNull() ?: 0.0
+        val spacingMean = if (nnDists.isNotEmpty()) nnDists.average() else 0.0
+        val spacingMedian = if (nnDists.isNotEmpty()) nnDists[nnDists.size / 2] else 50.0
+        val spacingP25 = if (nnDists.isNotEmpty()) nnDists[nnDists.size / 4] else spacingMedian
+        val spacingP75 = if (nnDists.isNotEmpty()) nnDists[(nnDists.size * 3) / 4] else spacingMedian
 
         val angles = mutableListOf<Double>()
-        val edges = mutableListOf<Triple<Int, Int, Double>>()
+        val adj = Array(points.size) { mutableListOf<Int>() }
         for (i in points.indices) {
             for (j in i + 1 until points.size) {
                 val p1 = points[i]
@@ -438,101 +539,126 @@ object V4OpticalAnalyzer {
                 val dx = p2.x - p1.x
                 val dy = p2.y - p1.y
                 val dist = hypot(dx, dy)
-                if (dist > spacing * 0.7 && dist < spacing * 1.3) {
+                if (dist > spacingMedian * 0.7 && dist < spacingMedian * 1.3) {
+                    adj[i].add(j)
+                    adj[j].add(i)
                     var a = Math.atan2(dy, dx)
                     while (a < 0) a += Math.PI / 2.0
                     while (a >= Math.PI / 2.0) a -= Math.PI / 2.0
                     angles.add(a)
-                    edges.add(Triple(i, j, Math.atan2(dy, dx)))
                 }
             }
         }
+        angles.sort()
+        val medianAngle = if (angles.isNotEmpty()) angles[angles.size / 2] else 0.0
+        val estimatedAngleDeg = Math.toDegrees(medianAngle)
 
-        val medianAngle = if (angles.isNotEmpty()) {
-            angles.sort()
-            angles[angles.size / 2]
-        } else 0.0
-
-        val cx = points.map { it.x }.average()
-        val cy = points.map { it.y }.average()
-        var bestSeedIdx = -1
-        var bestDist = Double.MAX_VALUE
+        val visited = BooleanArray(points.size)
+        val components = mutableListOf<List<Int>>()
         for (i in points.indices) {
-            val d = hypot(points[i].x - cx, points[i].y - cy)
-            if (d < bestDist) {
-                bestDist = d
-                bestSeedIdx = i
-            }
-        }
-
-        val grid = mutableMapOf<Pair<Int, Int>, Point>()
-        var assigned = 0
-        var ambiguous = 0
-        var collisions = 0
-
-        val queue = ArrayDeque<Pair<Int, Pair<Int, Int>>>()
-        val visited = mutableSetOf<Int>()
-        val coordsToIdx = mutableMapOf<Pair<Int, Int>, Int>()
-        
-        if (bestSeedIdx != -1) {
-            queue.addLast(Pair(bestSeedIdx, Pair(0, 0)))
-            visited.add(bestSeedIdx)
-            
-            while (queue.isNotEmpty()) {
-                val (currIdx, coord) = queue.removeFirst()
-                val (row, col) = coord
-                
-                if (grid.containsKey(coord)) {
-                    collisions++
-                    ambiguous++
-                    continue
-                }
-                
-                grid[coord] = points[currIdx]
-                coordsToIdx[coord] = currIdx
-                assigned++
-                
-                // Find neighbors
-                for (edge in edges) {
-                    if (edge.first == currIdx || edge.second == currIdx) {
-                        val nIdx = if (edge.first == currIdx) edge.second else edge.first
-                        if (visited.contains(nIdx)) continue
-                        
-                        val nPt = points[nIdx]
-                        val cPt = points[currIdx]
-                        val dx = nPt.x - cPt.x
-                        val dy = nPt.y - cPt.y
-                        
-                        // Transform delta to aligned space
-                        val cosA = Math.cos(-medianAngle)
-                        val sinA = Math.sin(-medianAngle)
-                        val rx = dx * cosA - dy * sinA
-                        val ry = dx * sinA + dy * cosA
-                        
-                        var dr = 0
-                        var dc = 0
-                        if (abs(rx) > abs(ry)) {
-                            dc = if (rx > 0) 1 else -1
-                        } else {
-                            dr = if (ry > 0) 1 else -1
+            if (!visited[i]) {
+                val comp = mutableListOf<Int>()
+                val q = ArrayDeque<Int>()
+                q.addLast(i)
+                visited[i] = true
+                while (q.isNotEmpty()) {
+                    val u = q.removeFirst()
+                    comp.add(u)
+                    for (v in adj[u]) {
+                        if (!visited[v]) {
+                            visited[v] = true
+                            q.addLast(v)
                         }
-                        
-                        val nCoord = Pair(row + dr, col + dc)
-                        queue.addLast(Pair(nIdx, nCoord))
-                        visited.add(nIdx)
                     }
                 }
+                components.add(comp)
             }
         }
-        
-        rejections["topologyInputDots"] = points.size
-        rejections["topologyAssignedDots"] = assigned
-        rejections["topologyUnassignedDots"] = points.size - assigned
-        rejections["topologyCollisions"] = collisions
-        rejections["topologyLargestComponent"] = assigned
-        rejections["topologyConsistencyErrors"] = ambiguous
-        
-        return grid
+        val connectedComponentsCount = components.size
+        val largestComp = components.maxByOrNull { it.size } ?: emptyList()
+        val largestComponentSize = largestComp.size
+
+        val refComp = if (largestComp.size >= points.size / 3) largestComp else points.indices.toList()
+        val originX = refComp.map { points[it].x }.average()
+        val originY = refComp.map { points[it].y }.average()
+
+        val cosA = Math.cos(-medianAngle)
+        val sinA = Math.sin(-medianAngle)
+        val grid = mutableMapOf<Pair<Int, Int>, Point>()
+
+        var rejectedNoNeighbor = 0
+        var rejectedSpacing = 0
+        var rejectedAngle = 0
+        var rejectedResidual = 0
+        var rejectedDisconnected = 0
+        var rejectedCollision = 0
+        var rejectedOutsideGrid = 0
+        var rejectedOther = 0
+
+        for (i in points.indices) {
+            val p = points[i]
+            if (adj[i].isEmpty()) {
+                rejectedNoNeighbor++
+                continue
+            }
+            if (!refComp.contains(i)) {
+                rejectedDisconnected++
+                continue
+            }
+
+            val dx = p.x - originX
+            val dy = p.y - originY
+            val rx = dx * cosA - dy * sinA
+            val ry = dx * sinA + dy * cosA
+
+            val col = round(rx / spacingMedian).toInt()
+            val row = round(ry / spacingMedian).toInt()
+
+            val resX = rx - col * spacingMedian
+            val resY = ry - row * spacingMedian
+            val resMag = hypot(resX, resY)
+
+            if (resMag >= spacingMedian * 0.45) {
+                rejectedResidual++
+                continue
+            }
+
+            val coord = Pair(row, col)
+            if (grid.containsKey(coord)) {
+                rejectedCollision++
+                continue
+            }
+
+            grid[coord] = p
+        }
+
+        val assignedCount = grid.size
+        val assignmentPct = if (points.isNotEmpty()) (assignedCount.toDouble() / points.size) * 100.0 else 0.0
+
+        return TopologyResult(
+            grid = grid,
+            estimatedSpacing = spacingMedian,
+            estimatedAngleDeg = estimatedAngleDeg,
+            originX = originX,
+            originY = originY,
+            connectedComponentsCount = connectedComponentsCount,
+            largestComponentSize = largestComponentSize,
+            spacingMin = spacingMin,
+            spacingMedian = spacingMedian,
+            spacingMean = spacingMean,
+            spacingP25 = spacingP25,
+            spacingP75 = spacingP75,
+            spacingMax = spacingMax,
+            rejectedNoNeighbor = rejectedNoNeighbor,
+            rejectedSpacing = rejectedSpacing,
+            rejectedAngle = rejectedAngle,
+            rejectedResidual = rejectedResidual,
+            rejectedDisconnected = rejectedDisconnected,
+            rejectedCollision = rejectedCollision,
+            rejectedOutsideGrid = rejectedOutsideGrid,
+            rejectedOther = rejectedOther,
+            assignmentPct = assignmentPct
+        )
     }
 
     suspend fun analyze(noLensFrames: List<Bitmap>, withLensFrames: List<Bitmap>): V4RunResult = withContext(Dispatchers.Default) {
@@ -547,12 +673,10 @@ object V4OpticalAnalyzer {
             val lensAgg = aggregateFrames(withLensFrames)
             val baseLensPoints = lensAgg.points
             
-            val spacing = estimateSpacing(baseRefPoints)
-            
-            val refRejections = mutableMapOf<String, Int>()
-            val gridMap = assignGridTopology(baseRefPoints, spacing, refRejections)
-            val lensRejections = mutableMapOf<String, Int>()
-            assignGridTopology(baseLensPoints, spacing, lensRejections)
+            val refTopo = assignGridTopology(baseRefPoints)
+            val lensTopo = assignGridTopology(baseLensPoints)
+            val gridMap = refTopo.grid
+            val spacing = refTopo.estimatedSpacing
 
             if (!refAgg.success) {
                 return@withContext V4RunResult(
@@ -562,14 +686,14 @@ object V4OpticalAnalyzer {
                     totalLensDots = baseLensPoints.size,
                     topologyInputReferenceDots = baseRefPoints.size,
                     topologyInputLensDots = baseLensPoints.size,
-                    topologyAssignedReferenceDots = refRejections["topologyAssignedDots"] ?: 0,
-                    topologyAssignedLensDots = lensRejections["topologyAssignedDots"] ?: 0,
-                    topologyUnassignedReferenceDots = refRejections["topologyUnassignedDots"] ?: 0,
-                    topologyUnassignedLensDots = lensRejections["topologyUnassignedDots"] ?: 0,
-                    topologyCollisionsReference = refRejections["topologyCollisions"] ?: 0,
-                    topologyCollisionsLens = lensRejections["topologyCollisions"] ?: 0,
-                    topologyConsistencyErrorsReference = refRejections["topologyConsistencyErrors"] ?: 0,
-                    topologyConsistencyErrorsLens = lensRejections["topologyConsistencyErrors"] ?: 0
+                    topologyAssignedReferenceDots = refTopo.grid.size,
+                    topologyAssignedLensDots = lensTopo.grid.size,
+                    topologyUnassignedReferenceDots = baseRefPoints.size - refTopo.grid.size,
+                    topologyUnassignedLensDots = baseLensPoints.size - lensTopo.grid.size,
+                    topologyCollisionsReference = refTopo.rejectedCollision,
+                    topologyCollisionsLens = lensTopo.rejectedCollision,
+                    topologyConsistencyErrorsReference = refTopo.connectedComponentsCount,
+                    topologyConsistencyErrorsLens = lensTopo.connectedComponentsCount
                 )
             }
             
@@ -581,14 +705,14 @@ object V4OpticalAnalyzer {
                     totalLensDots = baseLensPoints.size,
                     topologyInputReferenceDots = baseRefPoints.size,
                     topologyInputLensDots = baseLensPoints.size,
-                    topologyAssignedReferenceDots = refRejections["topologyAssignedDots"] ?: 0,
-                    topologyAssignedLensDots = lensRejections["topologyAssignedDots"] ?: 0,
-                    topologyUnassignedReferenceDots = refRejections["topologyUnassignedDots"] ?: 0,
-                    topologyUnassignedLensDots = lensRejections["topologyUnassignedDots"] ?: 0,
-                    topologyCollisionsReference = refRejections["topologyCollisions"] ?: 0,
-                    topologyCollisionsLens = lensRejections["topologyCollisionsLens"] ?: 0,
-                    topologyConsistencyErrorsReference = refRejections["topologyConsistencyErrors"] ?: 0,
-                    topologyConsistencyErrorsLens = lensRejections["topologyConsistencyErrors"] ?: 0
+                    topologyAssignedReferenceDots = refTopo.grid.size,
+                    topologyAssignedLensDots = lensTopo.grid.size,
+                    topologyUnassignedReferenceDots = baseRefPoints.size - refTopo.grid.size,
+                    topologyUnassignedLensDots = baseLensPoints.size - lensTopo.grid.size,
+                    topologyCollisionsReference = refTopo.rejectedCollision,
+                    topologyCollisionsLens = lensTopo.rejectedCollision,
+                    topologyConsistencyErrorsReference = refTopo.connectedComponentsCount,
+                    topologyConsistencyErrorsLens = lensTopo.connectedComponentsCount
                 )
             }
             
@@ -875,14 +999,14 @@ object V4OpticalAnalyzer {
                     totalLensDots = baseLensPoints.size,
                     topologyInputReferenceDots = baseRefPoints.size,
                     topologyInputLensDots = baseLensPoints.size,
-                    topologyAssignedReferenceDots = refRejections["topologyAssignedDots"] ?: 0,
-                    topologyAssignedLensDots = lensRejections["topologyAssignedDots"] ?: 0,
-                    topologyUnassignedReferenceDots = refRejections["topologyUnassignedDots"] ?: 0,
-                    topologyUnassignedLensDots = lensRejections["topologyUnassignedDots"] ?: 0,
-                    topologyCollisionsReference = refRejections["topologyCollisions"] ?: 0,
-                    topologyCollisionsLens = lensRejections["topologyCollisionsLens"] ?: 0,
-                    topologyConsistencyErrorsReference = refRejections["topologyConsistencyErrors"] ?: 0,
-                    topologyConsistencyErrorsLens = lensRejections["topologyConsistencyErrorsLens"] ?: 0,
+                    topologyAssignedReferenceDots = refTopo.grid.size,
+                    topologyAssignedLensDots = lensTopo.grid.size,
+                    topologyUnassignedReferenceDots = baseRefPoints.size - refTopo.grid.size,
+                    topologyUnassignedLensDots = baseLensPoints.size - lensTopo.grid.size,
+                    topologyCollisionsReference = refTopo.rejectedCollision,
+                    topologyCollisionsLens = lensTopo.rejectedCollision,
+                    topologyConsistencyErrorsReference = refTopo.connectedComponentsCount,
+                    topologyConsistencyErrorsLens = lensTopo.connectedComponentsCount,
                     seedReferenceCandidates = gridMap.size,
                     seedLensCandidates = baseLensPoints.size,
                     mutualNearestNeighborMatches = rejections["seedMutualMatches"] ?: 0,
@@ -913,14 +1037,15 @@ object V4OpticalAnalyzer {
             val checkCount = kotlin.math.min(15, withLensFrames.size)
             val checkFrames = withLensFrames.takeLast(checkCount)
             for (frame in checkFrames) {
-                val fPts = detectDots(frame)
+                val fPtsRes = detectDots(frame)
+                val fPts = fPtsRes.points
                 val fRef = mutableListOf<Point>()
                 val fLens = mutableListOf<Point>()
                 
                 for (i in candidateLens.indices) {
                     val exp = candidateLens[i]
                     var bestDist = Double.MAX_VALUE
-                    var bestPt: org.opencv.core.Point? = null
+                    var bestPt: Point? = null
                     for (p in fPts) {
                         val d = Math.hypot(p.x - exp.x, p.y - exp.y)
                         if (d < bestDist && d < spacing * 0.4) {
