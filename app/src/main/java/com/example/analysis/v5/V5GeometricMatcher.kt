@@ -1,7 +1,6 @@
 package com.example.analysis.v5
 
 import org.opencv.core.*
-import org.opencv.calib3d.Calib3d
 import kotlin.math.*
 
 data class MatcherOutput(
@@ -35,6 +34,53 @@ object V5GeometricMatcher {
         return SpacingStats(min, p25, median, p75, max, mean)
     }
 
+    private fun calculateMedianAndMAD(values: List<Double>): Pair<Double, Double> {
+        if (values.isEmpty()) return Pair(0.0, 0.0)
+        val sorted = values.sorted()
+        val median = sorted[sorted.size / 2]
+        val absDevs = sorted.map { abs(it - median) }.sorted()
+        val mad = absDevs[absDevs.size / 2]
+        return Pair(median, mad)
+    }
+
+    private fun estimateSimilarityTransformFallback(src: List<Point>, dst: List<Point>): DoubleArray {
+        val n = src.size
+        if (n < 2) return doubleArrayOf(1.0, 0.0, 0.0, 0.0, 1.0, 0.0)
+        var cxSrc = 0.0; var cySrc = 0.0
+        var cxDst = 0.0; var cyDst = 0.0
+        for (i in 0 until n) {
+            cxSrc += src[i].x; cySrc += src[i].y
+            cxDst += dst[i].x; cyDst += dst[i].y
+        }
+        cxSrc /= n; cySrc /= n
+        cxDst /= n; cyDst /= n
+
+        var num = 0.0
+        var den = 0.0
+        var varSrc = 0.0
+
+        for (i in 0 until n) {
+            val x1 = src[i].x - cxSrc
+            val y1 = src[i].y - cySrc
+            val x2 = dst[i].x - cxDst
+            val y2 = dst[i].y - cyDst
+
+            num += (x1 * y2 - y1 * x2)
+            den += (x1 * x2 + y1 * y2)
+            varSrc += (x1 * x1 + y1 * y1)
+        }
+
+        val theta = atan2(num, den)
+        val scale = if (varSrc > 1e-5) den / varSrc else 1.0
+        val cosT = cos(theta) * scale
+        val sinT = sin(theta) * scale
+
+        val tx = cxDst - (cosT * cxSrc - sinT * cySrc)
+        val ty = cyDst - (sinT * cxSrc + cosT * cySrc)
+
+        return doubleArrayOf(cosT, sinT, tx, -sinT, cosT, ty)
+    }
+
     fun match(referencePoints: List<Point>, lensPoints: List<Point>): MatcherOutput {
         if (referencePoints.size < 5 || lensPoints.size < 5) {
             val tel = V5Telemetry(
@@ -49,15 +95,26 @@ object V5GeometricMatcher {
         // Stage 3: Estimate target spacing
         val refStats = calculateSpacingStats(referencePoints)
         val lensStats = calculateSpacingStats(lensPoints)
-        val refMedian = refStats.median.toInt()
-        val lensMedian = lensStats.median.toInt()
+        val refMedianSpacing = refStats.median
 
         // Stage 2: Compute descriptors
-        val refDescriptors = referencePoints.mapIndexed { idx, pt -> V5PointDescriptor.compute(idx, pt, referencePoints, refStats.median) }
+        val refDescriptors = referencePoints.mapIndexed { idx, pt -> V5PointDescriptor.compute(idx, pt, referencePoints, refMedianSpacing) }
         val lensDescriptors = lensPoints.mapIndexed { idx, pt -> V5PointDescriptor.compute(idx, pt, lensPoints, lensStats.median) }
 
-        // Stage 4 & 5: Initial hypotheses & Robust seed correspondences (Mutual Nearest Neighbor in descriptor space + spatial proximity)
-        val seedMatchesMap = mutableMapOf<Int, Int>() // refIndex -> lensIndex
+        // Initial candidate pairs & Seeds
+        val initialMatches = mutableListOf<Triple<Int, Int, Double>>() // refIndex, lensIndex, descriptorScore
+        for ((rIdx, rDesc) in refDescriptors.withIndex()) {
+            for ((lIdx, lDesc) in lensDescriptors.withIndex()) {
+                val score = V5PointDescriptor.compare(rDesc, lDesc)
+                if (score < 2.5) {
+                    initialMatches.add(Triple(rIdx, lIdx, score))
+                }
+            }
+        }
+        val initialCandidateCount = initialMatches.size
+
+        // Find mutual nearest neighbor seeds in descriptor space
+        val seedMatchesMap = mutableMapOf<Int, Int>()
         val seedIndices = mutableSetOf<Int>()
 
         for ((rIdx, rDesc) in refDescriptors.withIndex()) {
@@ -70,16 +127,14 @@ object V5GeometricMatcher {
                     bestLensIdx = lIdx
                 }
             }
-
-            if (bestLensIdx != -1 && bestScore < 1.5) {
-                // Check mutual consistency in descriptor space
+            if (bestLensIdx != -1 && bestScore < 2.5) {
                 val lDesc = lensDescriptors[bestLensIdx]
                 var bestBackRefIdx = -1
                 var bestBackScore = Double.MAX_VALUE
                 for ((rI, rD) in refDescriptors.withIndex()) {
-                    val score = V5PointDescriptor.compare(rD, lDesc)
-                    if (score < bestBackScore) {
-                        bestBackScore = score
+                    val s = V5PointDescriptor.compare(rD, lDesc)
+                    if (s < bestBackScore) {
+                        bestBackScore = s
                         bestBackRefIdx = rI
                     }
                 }
@@ -90,142 +145,159 @@ object V5GeometricMatcher {
             }
         }
 
-        // Stage 6: Coarse Global Prediction using seeds (translation + rotation + scale via RANSAC or least squares)
+        // Iterative Transform Refinement & Expansion (Tasks 1, 2, 3, 4, 5)
+        var currentInliers = seedMatchesMap.toMutableMap()
         var predTx = 0.0
         var predTy = 0.0
         var predRotDeg = 0.0
         var predScale = 1.0
         var predRms = 0.0
+        var iterationCount = 0
+        val matchesAddedPerIteration = mutableListOf<Int>()
 
-        val acceptedCorrespondences = mutableMapOf<Int, Int>() // refIndex -> lensIndex
-        for ((rI, lI) in seedMatchesMap) {
-            acceptedCorrespondences[rI] = lI
-        }
+        var a = 1.0
+        var b = 0.0
 
-        if (seedMatchesMap.size >= 4) {
+        val maxIterations = 4
+        for (iter in 0 until maxIterations) {
+            iterationCount++
+            if (currentInliers.size < 4) break
+
             val srcPts = mutableListOf<Point>()
             val dstPts = mutableListOf<Point>()
-            for ((rI, lI) in seedMatchesMap) {
+            for ((rI, lI) in currentInliers) {
                 srcPts.add(referencePoints[rI])
                 dstPts.add(lensPoints[lI])
             }
-            val srcMat = MatOfPoint2f().apply { fromList(srcPts) }
-            val dstMat = MatOfPoint2f().apply { fromList(dstPts) }
-            val mask = Mat()
-            val affineMat = Calib3d.estimateAffinePartial2D(srcMat, dstMat, mask, Calib3d.RANSAC, refStats.median * 0.8)
-            if (!affineMat.empty()) {
-                val data = DoubleArray(6)
-                affineMat.get(0, 0, data)
-                // [a b tx; -b a ty] for partial affine (similarity)
-                val a = data[0]
-                val b = data[1]
-                predTx = data[2]
-                predTy = data[5]
-                predScale = sqrt(a * a + b * b)
-                predRotDeg = Math.toDegrees(atan2(b, a))
 
-                // Calculate RMS
-                var sumSq = 0.0
-                for (i in srcPts.indices) {
-                    val p = srcPts[i]
-                    val expectedX = a * p.x - b * p.y + predTx
-                    val expectedY = b * p.x + a * p.y + predTy
-                    val actual = dstPts[i]
-                    sumSq += hypot(actual.x - expectedX, actual.y - expectedY).pow(2)
-                }
-                predRms = sqrt(sumSq / srcPts.size)
+            val affineData = estimateSimilarityTransformFallback(srcPts, dstPts)
+            a = affineData[0]
+            b = affineData[1]
+            predTx = affineData[2]
+            predTy = affineData[5]
+            predScale = sqrt(a * a + b * b)
+            predRotDeg = Math.toDegrees(atan2(b, a))
+
+            // Calculate RMS on inliers
+            var sumSq = 0.0
+            for (i in srcPts.indices) {
+                val p = srcPts[i]
+                val expX = a * p.x - b * p.y + predTx
+                val expY = b * p.x + a * p.y + predTy
+                val act = dstPts[i]
+                sumSq += hypot(act.x - expX, act.y - expY).pow(2)
             }
-        }
+            predRms = sqrt(sumSq / srcPts.size)
 
-        // Stage 7: Mutual Nearest Neighbor Expansion using coarse prediction
-        var mnnCandidateCount = 0
-        var mnnAcceptedCount = 0
-        var mnnRejectedDistance = 0
-        var mnnRejectedNonMutual = 0
+            // Expand or re-evaluate using adaptive residual threshold (Task 1 & 2)
+            val allCandidatePairs = mutableListOf<Triple<Int, Int, Double>>() // refIndex, lensIndex, residual
 
-        val searchRadius = refStats.median * 0.6
+            val searchRadius = refMedianSpacing * 1.2
+            for ((rI, rPt) in referencePoints.withIndex()) {
+                val expX = a * rPt.x - b * rPt.y + predTx
+                val expY = b * rPt.x + a * rPt.y + predTy
 
-        for ((rI, rPt) in referencePoints.withIndex()) {
-            if (acceptedCorrespondences.containsKey(rI)) continue
-
-            // Predict position
-            val predX: Double
-            val predY: Double
-            if (seedMatchesMap.size >= 4) {
-                val srcMat = MatOfPoint2f(rPt)
-                val dstMat = MatOfPoint2f()
-                // Construct affine matrix
-                val rad = Math.toRadians(predRotDeg)
-                val cosA = cos(rad) * predScale
-                val sinA = sin(rad) * predScale
-                predX = cosA * rPt.x - sinA * rPt.y + predTx
-                predY = sinA * rPt.x + cosA * rPt.y + predTy
-            } else {
-                predX = rPt.x + (lensPoints.map { it.x }.average() - referencePoints.map { it.x }.average())
-                predY = rPt.y + (lensPoints.map { it.y }.average() - referencePoints.map { it.y }.average())
-            }
-
-            // Find nearest lens point to prediction
-            var bestLensIdx = -1
-            var bestDist = Double.MAX_VALUE
-            for ((lI, lPt) in lensPoints.withIndex()) {
-                if (acceptedCorrespondences.containsValue(lI)) continue
-                val d = hypot(lPt.x - predX, lPt.y - predY)
-                if (d < bestDist) {
-                    bestDist = d
-                    bestLensIdx = lI
+                for ((lI, lPt) in lensPoints.withIndex()) {
+                    val res = hypot(lPt.x - expX, lPt.y - expY)
+                    if (res <= searchRadius) {
+                        allCandidatePairs.add(Triple(rI, lI, res))
+                    }
                 }
             }
-            mnnCandidateCount++
 
-            if (bestLensIdx != -1 && bestDist <= searchRadius) {
-                // Mutual check: does this lens point select this reference point?
-                val lPt = lensPoints[bestLensIdx]
-                var bestBackRefIdx = -1
-                var bestBackDist = Double.MAX_VALUE
-                for ((rIdx, rP) in referencePoints.withIndex()) {
-                    val d = hypot(lPt.x - (if (seedMatchesMap.size >= 4) {
-                        val rad = Math.toRadians(predRotDeg)
-                        cos(rad) * predScale * rP.x - sin(rad) * predScale * rP.y + predTx
-                    } else rP.x + predTx), lPt.y - (if (seedMatchesMap.size >= 4) {
-                        val rad = Math.toRadians(predRotDeg)
-                        sin(rad) * predScale * rP.x + cos(rad) * predScale * rP.y + predTy
-                    } else rP.y + predTy))
-                    if (d < bestBackDist) {
-                        bestBackDist = d
-                        bestBackRefIdx = rIdx
+            if (allCandidatePairs.isEmpty()) break
+
+            val residuals = allCandidatePairs.map { it.third }
+            val (medRes, madRes) = calculateMedianAndMAD(residuals)
+            // Task 2: Adaptive residual threshold
+            val adaptiveThreshold = max(3.0, min(medRes + 3.0 * 1.4826 * madRes, refMedianSpacing * 0.35))
+
+            val validCandidates = mutableListOf<Triple<Int, Int, Double>>() // refIndex, lensIndex, residual
+            for (cand in allCandidatePairs) {
+                val rI = cand.first
+                val lI = cand.second
+                val res = cand.third
+
+                if (res > adaptiveThreshold) continue
+
+                // Task 3: Displacement & local consistency check
+                val rPt = referencePoints[rI]
+                val lPt = lensPoints[lI]
+                val dx = lPt.x - rPt.x
+                val dy = lPt.y - rPt.y
+
+                var localConsistent = true
+                if (currentInliers.isNotEmpty()) {
+                    val nearbyInliers = currentInliers.entries.filter { (inR, _) ->
+                        hypot(referencePoints[inR].x - rPt.x, referencePoints[inR].y - rPt.y) <= refMedianSpacing * 2.0
+                    }
+                    if (nearbyInliers.isNotEmpty()) {
+                        val meanNeighborDx = nearbyInliers.map { (inR, inL) -> lensPoints[inL].x - referencePoints[inR].x }.average()
+                        val meanNeighborDy = nearbyInliers.map { (inR, inL) -> lensPoints[inL].y - referencePoints[inR].y }.average()
+                        val motionDiff = hypot(dx - meanNeighborDx, dy - meanNeighborDy)
+                        if (motionDiff > refMedianSpacing * 0.3) {
+                            localConsistent = false
+                        }
                     }
                 }
 
-                if (bestBackRefIdx == rI) {
-                    acceptedCorrespondences[rI] = bestLensIdx
-                    mnnAcceptedCount++
-                } else {
-                    mnnRejectedNonMutual++
-                }
-            } else {
-                mnnRejectedDistance++
+                if (!localConsistent) continue
+
+                validCandidates.add(cand)
             }
+
+            // Task 4: One-to-one collision enforcement (keep best combined score)
+            val bestRefToLens = mutableMapOf<Int, Triple<Int, Double, Double>>() // refIndex -> (lensIndex, residual, score)
+            val bestLensToRef = mutableMapOf<Int, Triple<Int, Double, Double>>() // lensIndex -> (refIndex, residual, score)
+
+            for (cand in validCandidates) {
+                val rI = cand.first
+                val lI = cand.second
+                val res = cand.third
+                val descScore = initialMatches.find { it.first == rI && it.second == lI }?.third ?: 1.0
+                val combinedScore = res + descScore * 10.0
+
+                if (!bestRefToLens.containsKey(rI) || combinedScore < bestRefToLens[rI]!!.third) {
+                    bestRefToLens[rI] = Triple(lI, res, combinedScore)
+                }
+                if (!bestLensToRef.containsKey(lI) || combinedScore < bestLensToRef[lI]!!.third) {
+                    bestLensToRef[lI] = Triple(rI, res, combinedScore)
+                }
+            }
+
+            val nextInliers = mutableMapOf<Int, Int>()
+            for ((rI, trip) in bestRefToLens) {
+                val lI = trip.first
+                if (bestLensToRef[lI]?.first == rI) {
+                    nextInliers[rI] = lI
+                }
+            }
+
+            val addedCount = nextInliers.size - currentInliers.size
+            matchesAddedPerIteration.add(max(0, addedCount))
+            currentInliers = nextInliers
+
+            if (abs(addedCount) <= 1 && iter > 0) break
         }
 
-        // Stage 8 & 9: Local neighbor consistency & Iterative expansion
-        var localGeometryAccepted = mnnAcceptedCount
-        var localGeometryRejected = 0
-        var iterationCount = 1
-        val matchesAddedPerIteration = mutableListOf(mnnAcceptedCount)
-
-        // Stage 10: Build final correspondence list
+        // Build final correspondences and evaluate quality gates (Task 6)
         val finalCorrespondences = mutableListOf<V5Correspondence>()
-        val w = 1080.0 // default screen width reference if needed
-        val h = 1920.0
+        val acceptedMap = currentInliers
+
         val cx = referencePoints.map { it.x }.average()
         val cy = referencePoints.map { it.y }.average()
 
         var q1 = 0; var q2 = 0; var q3 = 0; var q4 = 0
+        val acceptedResiduals = mutableListOf<Double>()
 
-        for ((rI, lI) in acceptedCorrespondences) {
+        for ((rI, lI) in acceptedMap) {
             val rPt = referencePoints[rI]
             val lPt = lensPoints[lI]
+            val expX = a * rPt.x - b * rPt.y + predTx
+            val expY = b * rPt.x + a * rPt.y + predTy
+            val resPx = hypot(lPt.x - expX, lPt.y - expY)
+            acceptedResiduals.add(resPx)
+
             val rawDx = lPt.x - rPt.x
             val rawDy = lPt.y - rPt.y
             val isSeed = seedIndices.contains(rI)
@@ -239,10 +311,12 @@ object V5GeometricMatcher {
                 V5Correspondence(
                     referencePoint = rPt,
                     observedPoint = lPt,
+                    predictedPoint = Point(expX, expY),
                     referenceIndex = rI,
                     lensIndex = lI,
                     rawDx = rawDx,
                     rawDy = rawDy,
+                    residualPx = resPx,
                     matchConfidence = if (isSeed) 0.95 else 0.85,
                     descriptorScore = 0.9,
                     localConsistencyScore = 0.9,
@@ -253,28 +327,39 @@ object V5GeometricMatcher {
 
         val quadrantsCovered = listOf(q1, q2, q3, q4).count { it > 0 }
         val coveragePct = (finalCorrespondences.size.toDouble() / referencePoints.size) * 100.0
-        val success = finalCorrespondences.size >= 5 && quadrantsCovered >= 2
+
+        val (medRes, madRes) = calculateMedianAndMAD(acceptedResiduals)
+        val maxRes = acceptedResiduals.maxOrNull() ?: 0.0
+
+        // Task 6: Quality gates
+        val correspondenceSuccess = finalCorrespondences.size >= 10 && quadrantsCovered >= 3 && coveragePct >= 35.0
+        val measurementQualityValid = predRms <= refMedianSpacing * 0.25 && medRes <= refMedianSpacing * 0.15 && maxRes <= refMedianSpacing * 0.35
+        val success = correspondenceSuccess && measurementQualityValid
 
         val telemetry = V5Telemetry(
             referencePointCount = referencePoints.size,
             lensPointCount = lensPoints.size,
-            referenceMedianSpacing = refStats.median,
+            referenceMedianSpacing = refMedianSpacing,
             lensMedianSpacing = lensStats.median,
             referenceSpacingStats = refStats,
             lensSpacingStats = lensStats,
-            candidatePairCount = referencePoints.size * lensPoints.size,
+            initialCandidateMatches = initialCandidateCount,
             seedMatchCount = seedMatchesMap.size,
+            preValidationMatches = initialCandidateCount,
+            acceptedInlierMatches = finalCorrespondences.size,
+            rejectedResidual = 0,
+            rejectedLocalConsistency = 0,
+            rejectedCollision = 0,
+            rejectedTransform = 0,
+            medianResidualPx = medRes,
+            residualMadPx = madRes,
+            maxAcceptedResidualPx = maxRes,
+            transformInliers = acceptedMap.size,
+            transformRms = predRms,
             predictionTx = predTx,
             predictionTy = predTy,
             predictionRotationDeg = predRotDeg,
             predictionScale = predScale,
-            predictionRms = predRms,
-            mnnCandidateCount = mnnCandidateCount,
-            mnnAcceptedCount = mnnAcceptedCount,
-            mnnRejectedDistance = mnnRejectedDistance,
-            mnnRejectedNonMutual = mnnRejectedNonMutual,
-            localGeometryAccepted = localGeometryAccepted,
-            localGeometryRejected = localGeometryRejected,
             iterationCount = iterationCount,
             matchesAddedPerIteration = matchesAddedPerIteration,
             q1Matches = q1,
@@ -283,8 +368,10 @@ object V5GeometricMatcher {
             q4Matches = q4,
             quadrantsCovered = quadrantsCovered,
             coveragePct = coveragePct,
+            correspondenceSuccess = correspondenceSuccess,
+            measurementQualityValid = measurementQualityValid,
             success = success,
-            failureReason = if (success) "" else "INSUFFICIENT_GEOMETRIC_CORRESPONDENCE"
+            failureReason = if (success) "" else if (!correspondenceSuccess) "INSUFFICIENT_CORRESPONDENCES" else "POOR_MEASUREMENT_QUALITY"
         )
 
         return MatcherOutput(finalCorrespondences, telemetry, seedIndices)

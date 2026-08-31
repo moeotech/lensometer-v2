@@ -10,7 +10,6 @@ import kotlin.math.*
 
 object V5DeflectometryAnalyzer {
 
-    // Reuse dot detection pipeline compatible with V2/V4
     private fun detectDots(bitmap: Bitmap): List<Point> {
         val mat = Mat()
         Utils.bitmapToMat(bitmap, mat)
@@ -54,7 +53,6 @@ object V5DeflectometryAnalyzer {
             )
         }
 
-        // Aggregate points across frames (take frame with most points or average)
         val refPoints = noLensFrames.maxByOrNull { detectDots(it).size }?.let { detectDots(it) } ?: emptyList()
         val lensPoints = withLensFrames.maxByOrNull { detectDots(it).size }?.let { detectDots(it) } ?: emptyList()
 
@@ -76,7 +74,7 @@ object V5DeflectometryAnalyzer {
         val telemetry = matcherOutput.telemetry
         val seedIndices = matcherOutput.seedIndices
 
-        val rawFieldResult = if (correspondences.isNotEmpty()) {
+        val rawFieldResult = if (telemetry.success) {
             V5FieldAnalyzer.analyze(correspondences)
         } else null
 
@@ -86,7 +84,8 @@ object V5DeflectometryAnalyzer {
             referencePoints = referencePoints,
             lensPoints = lensPoints,
             correspondences = correspondences,
-            seedIndices = seedIndices
+            seedIndices = seedIndices,
+            telemetry = telemetry
         )
 
         return V5MatchResult(

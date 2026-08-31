@@ -381,14 +381,17 @@ fun V4ResultDialog(result: V4Result, noLensFrames: List<Bitmap>, withLensFrames:
             } else if (v5Result != null) {
                 val v5 = v5Result!!
                 val tel = v5.telemetry
-                Text("V5 Status: ${if (v5.success) "SUCCESS" else "FAILED"}", color = if (v5.success) Color.Green else Color.Red)
+                Text(
+                    text = "V5 Status: ${if (v5.success) "SUCCESS" else "FAILED"} (Corr: ${tel.correspondenceSuccess}, Quality: ${tel.measurementQualityValid})",
+                    color = if (v5.success) Color.Green else Color.Red
+                )
                 Text("Reference Points: ${tel.referencePointCount} | Lens Points: ${tel.lensPointCount}", color = Color.LightGray)
-                Text("Candidate Pairs: ${tel.candidatePairCount} | Seed Matches: ${tel.seedMatchCount}", color = Color.LightGray)
-                Text("MNN Accepted: ${tel.mnnAcceptedCount} (Rejected Dist: ${tel.mnnRejectedDistance}, Non-Mutual: ${tel.mnnRejectedNonMutual})", color = Color.LightGray)
-                Text("Final Accepted Matches: ${v5.correspondences.size}", color = Color.Green, fontWeight = FontWeight.Bold)
+                Text("Initial Candidate Matches: ${tel.initialCandidateMatches} | Seed Matches: ${tel.seedMatchCount}", color = Color.LightGray)
+                Text("Final Accepted Inlier Matches: ${tel.acceptedInlierMatches}", color = Color.Green, fontWeight = FontWeight.Bold)
+                Text("Residuals — Median: ${String.format("%.2f", tel.medianResidualPx)}px | MAD: ${String.format("%.2f", tel.residualMadPx)}px | Max: ${String.format("%.2f", tel.maxAcceptedResidualPx)}px", color = Color.Cyan)
                 Text("Quadrants Covered: ${tel.quadrantsCovered} (Q1: ${tel.q1Matches}, Q2: ${tel.q2Matches}, Q3: ${tel.q3Matches}, Q4: ${tel.q4Matches})", color = Color.LightGray)
                 Text("Spatial Coverage: ${String.format("%.1f", tel.coveragePct)}%", color = Color.LightGray)
-                Text("Prediction Transform: Tx=${String.format("%.1f", tel.predictionTx)}, Ty=${String.format("%.1f", tel.predictionTy)}, Rot=${String.format("%.1f", tel.predictionRotationDeg)}°, Scale=${String.format("%.3f", tel.predictionScale)}, RMS=${String.format("%.2f", tel.predictionRms)}", color = Color.LightGray)
+                Text("Prediction Transform: Tx=${String.format("%.1f", tel.predictionTx)}, Ty=${String.format("%.1f", tel.predictionTy)}, Rot=${String.format("%.1f", tel.predictionRotationDeg)}°, Scale=${String.format("%.3f", tel.predictionScale)}, RMS=${String.format("%.2f", tel.transformRms)}px", color = Color.LightGray)
 
                 if (v5.rawFieldResult != null) {
                     val rf = v5.rawFieldResult!!
@@ -420,17 +423,26 @@ fun V4ResultDialog(result: V4Result, noLensFrames: List<Bitmap>, withLensFrames:
                     val v5Export = buildString {
                         appendLine("=== V5 GEOMETRIC CORRESPONDENCE EXPORT ===")
                         appendLine("Timestamp: ${java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).format(java.util.Date())}")
-                        appendLine("Success: ${v5.success}")
+                        appendLine("Success: ${v5.success} (Correspondence Success: ${tel.correspondenceSuccess}, Quality Valid: ${tel.measurementQualityValid})")
                         appendLine("Reference Points: ${tel.referencePointCount}")
                         appendLine("Lens Points: ${tel.lensPointCount}")
                         appendLine("Ref Median Spacing: ${tel.referenceMedianSpacing}")
                         appendLine("Lens Median Spacing: ${tel.lensMedianSpacing}")
-                        appendLine("Candidate Pairs: ${tel.candidatePairCount}")
+                        appendLine("Initial Candidate Matches: ${tel.initialCandidateMatches}")
                         appendLine("Seed Matches: ${tel.seedMatchCount}")
-                        appendLine("MNN Accepted: ${tel.mnnAcceptedCount}")
-                        appendLine("MNN Rejected Distance: ${tel.mnnRejectedDistance}")
-                        appendLine("MNN Rejected Non-Mutual: ${tel.mnnRejectedNonMutual}")
-                        appendLine("Final Accepted Matches: ${v5.correspondences.size}")
+                        appendLine("Pre-validation Matches: ${tel.preValidationMatches}")
+                        appendLine("Accepted Inlier Matches: ${tel.acceptedInlierMatches}")
+                        appendLine("Rejected Residual: ${tel.rejectedResidual}")
+                        appendLine("Rejected Local Consistency: ${tel.rejectedLocalConsistency}")
+                        appendLine("Rejected Collision: ${tel.rejectedCollision}")
+                        appendLine("Rejected Transform: ${tel.rejectedTransform}")
+                        appendLine("Median Residual Px: ${tel.medianResidualPx}")
+                        appendLine("Residual MAD Px: ${tel.residualMadPx}")
+                        appendLine("Max Accepted Residual Px: ${tel.maxAcceptedResidualPx}")
+                        appendLine("Transform Inliers: ${tel.transformInliers}")
+                        appendLine("Transform RMS: ${tel.transformRms}")
+                        appendLine("Iterations: ${tel.iterationCount}")
+                        appendLine("Matches Added Per Iteration: ${tel.matchesAddedPerIteration}")
                         appendLine("Q1: ${tel.q1Matches} | Q2: ${tel.q2Matches} | Q3: ${tel.q3Matches} | Q4: ${tel.q4Matches}")
                         appendLine("Quadrants Covered: ${tel.quadrantsCovered}")
                         appendLine("Coverage Pct: ${tel.coveragePct}%")
@@ -438,8 +450,14 @@ fun V4ResultDialog(result: V4Result, noLensFrames: List<Bitmap>, withLensFrames:
                         appendLine("Prediction Ty: ${tel.predictionTy}")
                         appendLine("Prediction Rotation: ${tel.predictionRotationDeg}")
                         appendLine("Prediction Scale: ${tel.predictionScale}")
-                        appendLine("Prediction RMS: ${tel.predictionRms}")
+                        appendLine("")
+                        appendLine("--- ACCEPTED CORRESPONDENCES ---")
+                        for (corr in v5.correspondences) {
+                            appendLine("Ref[${corr.referenceIndex}] (${corr.referencePoint.x}, ${corr.referencePoint.y}) -> Lens[${corr.lensIndex}] (${corr.observedPoint.x}, ${corr.observedPoint.y}) [Pred: (${corr.predictedPoint.x}, ${corr.predictedPoint.y}), Res: ${corr.residualPx}, Dx: ${corr.rawDx}, Dy: ${corr.rawDy}, Inlier: ${corr.isInlier}]")
+                        }
                         v5.rawFieldResult?.let { rf ->
+                            appendLine("")
+                            appendLine("--- RAW FIELD ---")
                             appendLine("Mean Dx: ${rf.meanDx} | Mean Dy: ${rf.meanDy}")
                             appendLine("Principal Value 1: ${rf.principalValue1}")
                             appendLine("Principal Value 2: ${rf.principalValue2}")

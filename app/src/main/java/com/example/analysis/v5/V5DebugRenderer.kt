@@ -13,7 +13,8 @@ object V5DebugRenderer {
         referencePoints: List<Point>,
         lensPoints: List<Point>,
         correspondences: List<V5Correspondence>,
-        seedIndices: Set<Int>
+        seedIndices: Set<Int>,
+        telemetry: V5Telemetry? = null
     ): Bitmap {
         val w = if (width > 0) width else 800
         val h = if (height > 0) height else 800
@@ -25,45 +26,61 @@ object V5DebugRenderer {
             isAntiAlias = true
         }
 
-        // Draw reference points in blue/cyan
+        // Draw reference points in cyan
         paint.color = Color.parseColor("#00E5FF")
         paint.strokeWidth = 6f
-        for ((idx, pt) in referencePoints.withIndex()) {
-            canvas.drawCircle(pt.x.toFloat(), pt.y.toFloat(), 6f, paint)
-        }
-
-        // Draw lens points in orange/yellow
-        paint.color = Color.parseColor("#FFD600")
-        for (pt in lensPoints) {
+        for (pt in referencePoints) {
             canvas.drawCircle(pt.x.toFloat(), pt.y.toFloat(), 5f, paint)
         }
 
-        // Draw accepted correspondences as lines
-        paint.strokeWidth = 2f
-        for (corr in correspondences) {
-            paint.color = if (seedIndices.contains(corr.referenceIndex)) {
-                Color.parseColor("#00E676") // Green for seeds
-            } else {
-                Color.parseColor("#2979FF") // Blue for MNN/expanded matches
-            }
-            canvas.drawLine(
-                corr.referencePoint.x.toFloat(), corr.referencePoint.y.toFloat(),
-                corr.observedPoint.x.toFloat(), corr.observedPoint.y.toFloat(),
-                paint
-            )
-
-            // Draw observed point marker
-            paint.color = Color.parseColor("#FF1744")
-            canvas.drawCircle(corr.observedPoint.x.toFloat(), corr.observedPoint.y.toFloat(), 4f, paint)
+        // Draw lens points in yellow
+        paint.color = Color.parseColor("#FFD600")
+        for (pt in lensPoints) {
+            canvas.drawCircle(pt.x.toFloat(), pt.y.toFloat(), 4f, paint)
         }
 
-        // Draw legend / header text
+        // Draw correspondences
+        for (corr in correspondences) {
+            if (corr.isInlier) {
+                paint.color = if (seedIndices.contains(corr.referenceIndex)) {
+                    Color.parseColor("#00E676") // Green for seeds
+                } else {
+                    Color.parseColor("#2979FF") // Blue/Cyan for accepted inliers
+                }
+                paint.strokeWidth = 2.5f
+                canvas.drawLine(
+                    corr.referencePoint.x.toFloat(), corr.referencePoint.y.toFloat(),
+                    corr.observedPoint.x.toFloat(), corr.observedPoint.y.toFloat(),
+                    paint
+                )
+                paint.color = Color.parseColor("#00E676")
+                canvas.drawCircle(corr.observedPoint.x.toFloat(), corr.observedPoint.y.toFloat(), 4f, paint)
+            } else {
+                // Rejected / Outlier in thin red
+                paint.color = Color.parseColor("#FF1744")
+                paint.strokeWidth = 1f
+                canvas.drawLine(
+                    corr.referencePoint.x.toFloat(), corr.referencePoint.y.toFloat(),
+                    corr.observedPoint.x.toFloat(), corr.observedPoint.y.toFloat(),
+                    paint
+                )
+            }
+        }
+
+        // Draw HUD / Header text
         paint.color = Color.WHITE
-        paint.textSize = 28f
-        canvas.drawText("V5 Geometric Correspondence Debug View", 30f, 50f, paint)
-        paint.textSize = 20f
-        paint.color = Color.parseColor("#00E676")
-        canvas.drawText("Seeds: ${seedIndices.size} | Accepted Matches: ${correspondences.size}", 30f, 85f, paint)
+        paint.textSize = 26f
+        canvas.drawText("V5 Hardened Correspondence Debug View", 30f, 50f, paint)
+
+        if (telemetry != null) {
+            paint.textSize = 18f
+            paint.color = Color.parseColor("#00E676")
+            canvas.drawText("Accepted: ${telemetry.acceptedInlierMatches} | Seeds: ${telemetry.seedMatchCount}", 30f, 82f, paint)
+            paint.color = Color.parseColor("#00E5FF")
+            canvas.drawText("Median Res: ${String.format("%.1f", telemetry.medianResidualPx)}px | MAD: ${String.format("%.1f", telemetry.residualMadPx)}px", 30f, 110f, paint)
+            paint.color = Color.parseColor("#FFD600")
+            canvas.drawText("Max Res: ${String.format("%.1f", telemetry.maxAcceptedResidualPx)}px | RMS: ${String.format("%.2f", telemetry.transformRms)}px", 30f, 138f, paint)
+        }
 
         return bitmap
     }
