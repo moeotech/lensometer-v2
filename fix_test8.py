@@ -1,4 +1,14 @@
-package com.example.analysis.v6
+import re
+
+with open('app/src/test/java/com/example/analysis/v6/V6SyntheticTest.kt', 'r') as f:
+    content = f.read()
+
+lines = content.split('\n')
+# We need to make sure the class is properly opened and closed.
+# Let's count { and } to be safe.
+# Actually, the simplest way is to format the file properly. Let's just rewrite it to be safe.
+
+fixed_content = """package com.example.analysis.v6
 
 import org.junit.Assert.*
 import org.junit.Before
@@ -176,3 +186,7 @@ class V6SyntheticTest {
         assertEquals(1.05, result.telemetry.ratioMedian, 0.01)
     }
 }
+"""
+
+with open('app/src/test/java/com/example/analysis/v6/V6SyntheticTest.kt', 'w') as f:
+    f.write(fixed_content)

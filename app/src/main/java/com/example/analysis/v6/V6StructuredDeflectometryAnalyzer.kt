@@ -62,14 +62,36 @@ object V6StructuredDeflectometryAnalyzer {
         if (refPoints.isEmpty() || lensPoints.isEmpty()) {
             return@withContext V6Result(V6Telemetry(success = false, failureReason = "No points detected"))
         }
-        return@withContext analyzePoints(refPoints, lensPoints, noLensFrames[0].width, noLensFrames[0].height)
+        
+        var roiSource = "FALLBACK"
+        var roiCenterX = noLensFrames[0].width / 2.0
+        var roiCenterY = noLensFrames[0].height / 2.0
+        var roiInnerR = min(noLensFrames[0].width, noLensFrames[0].height) * 0.25
+        var roiOuterR = min(noLensFrames[0].width, noLensFrames[0].height) * 0.40
+
+        for (frame in withLensFrames) {
+            val ell = com.example.ui.detectLensEllipse(frame)
+            if (ell != null) {
+                roiCenterX = ell.center.x
+                roiCenterY = ell.center.y
+                val minR = min(ell.size.width, ell.size.height) / 2.0
+                val maxR = max(ell.size.width, ell.size.height) / 2.0
+                roiInnerR = minR * 0.8
+                roiOuterR = maxR * 1.2
+                roiSource = "AUTO"
+                break
+            }
+        }
+        
+        val providedRoi = V6LensRoi(roiCenterX, roiCenterY, roiInnerR, roiOuterR)
+        return@withContext analyzePoints(refPoints, lensPoints, noLensFrames[0].width, noLensFrames[0].height, providedRoi, roiSource)
     }
 
-    fun analyzePoints(refPoints: List<Point>, lensPoints: List<Point>, width: Int = 1080, height: Int = 1920): V6Result {
+    fun analyzePoints(refPoints: List<Point>, lensPoints: List<Point>, width: Int = 1080, height: Int = 1920, providedRoi: V6LensRoi? = null, providedRoiSource: String = "FALLBACK"): V6Result {
         val refGrid = V6GridDetector.recoverZeroGrid(refPoints)
         val lensGrid = V6GridDetector.recoverLensGrid(lensPoints, refGrid)
         
-        val roi = V6LensRoi(
+        val roi = providedRoi ?: V6LensRoi(
             centerX = width / 2.0,
             centerY = height / 2.0,
             innerRadius = min(width, height) * 0.25,
@@ -254,6 +276,11 @@ object V6StructuredDeflectometryAnalyzer {
             estimatedSpacingY = refGrid.spacingY,
             gridOriginX = refGrid.originX,
             gridOriginY = refGrid.originY,
+            lensRoiCenterX = roi.centerX,
+            lensRoiCenterY = roi.centerY,
+            lensRoiInnerRadius = roi.innerRadius,
+            lensRoiOuterRadius = roi.outerRadius,
+            lensRoiSource = providedRoiSource,
             referenceAssignedCells = refGrid.validCellCount,
             lensAssignedCells = lensGrid.validCellCount,
             commonGridCells = commonKeys.size,

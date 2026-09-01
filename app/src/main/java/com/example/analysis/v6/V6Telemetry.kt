@@ -12,6 +12,12 @@ data class V6Telemetry(
     val estimatedSpacingY: Double = 0.0,
     val gridOriginX: Double = 0.0,
     val gridOriginY: Double = 0.0,
+    val lensRoiCenterX: Double = 0.0,
+    val lensRoiCenterY: Double = 0.0,
+    val lensRoiInnerRadius: Double = 0.0,
+    val lensRoiOuterRadius: Double = 0.0,
+    val lensRoiSource: String = "FALLBACK",
+
     
     val referenceAssignedCells: Int = 0,
     val lensAssignedCells: Int = 0,

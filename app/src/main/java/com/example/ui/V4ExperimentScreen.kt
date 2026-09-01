@@ -495,6 +495,7 @@ fun V4ResultDialog(result: V4Result, noLensFrames: List<Bitmap>, withLensFrames:
                     text = "V6 Status: ${if (tel.success) "SUCCESS" else "FAILED"} (${tel.failureReason})",
                     color = if (tel.success) Color.Green else Color.Red
                 )
+                Text("Lens ROI: ${tel.lensRoiSource} (${String.format("${String.format("${String.format("%.1f", tel.lensRoiInnerRadius)}", tel.lensRoiCenterY)}", tel.lensRoiCenterX)}, %.1f) R=%.1f", color = Color.Yellow)
                 Text("Inside Lens Cells: Ref=${tel.insideLensRefCells}, Lens=${tel.insideLensLensCells}, Common=${tel.insideLensCommonCells}", color = Color.LightGray)
                 Text("Accepted Vectors: ${tel.acceptedVectorCount} / ${tel.rawVectorCount}", color = Color.Green, fontWeight = FontWeight.Bold)
                 Text("Ratio Median: ${String.format("%.4f", tel.acceptedRatioMedian)} | MAD: ${String.format("%.4f", tel.acceptedRatioMAD)}", color = Color.Cyan)
@@ -532,6 +533,11 @@ fun V4ResultDialog(result: V4Result, noLensFrames: List<Bitmap>, withLensFrames:
                         appendLine("Timestamp: ${java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).format(java.util.Date())}")
                         appendLine("Git Commit: ${tel.gitCommit}")
                         appendLine("Success: ${tel.success} (${tel.failureReason})")
+                        appendLine("Lens ROI Source: ${tel.lensRoiSource}")
+                        appendLine("Lens ROI Center X: ${tel.lensRoiCenterX}")
+                        appendLine("Lens ROI Center Y: ${tel.lensRoiCenterY}")
+                        appendLine("Lens ROI Inner Radius: ${tel.lensRoiInnerRadius}")
+                        appendLine("Lens ROI Outer Radius: ${tel.lensRoiOuterRadius}")
                         appendLine("Global Tx: ${tel.globalTx}")
                         appendLine("Global Ty: ${tel.globalTy}")
                         appendLine("Global Rotation: ${tel.globalRotation}")
