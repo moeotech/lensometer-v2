@@ -495,7 +495,14 @@ fun V4ResultDialog(result: V4Result, noLensFrames: List<Bitmap>, withLensFrames:
                     text = "V6 Status: ${if (tel.success) "SUCCESS" else "FAILED"} (${tel.failureReason})",
                     color = if (tel.success) Color.Green else Color.Red
                 )
-                Text("Lens ROI: ${tel.lensRoiSource} (${String.format("${String.format("${String.format("%.1f", tel.lensRoiInnerRadius)}", tel.lensRoiCenterY)}", tel.lensRoiCenterX)}, %.1f) R=%.1f", color = Color.Yellow)
+                Text(
+                    "Lens ROI: ${tel.lensRoiSource} " +
+                    "(${String.format("%.1f", tel.lensRoiCenterX)}, " +
+                    "${String.format("%.1f", tel.lensRoiCenterY)}) " +
+                    "Rin=${String.format("%.1f", tel.lensRoiInnerRadius)} " +
+                    "Rout=${String.format("%.1f", tel.lensRoiOuterRadius)}",
+                    color = Color.Yellow
+                )
                 Text("Inside Lens Cells: Ref=${tel.insideLensRefCells}, Lens=${tel.insideLensLensCells}, Common=${tel.insideLensCommonCells}", color = Color.LightGray)
                 Text("Accepted Vectors: ${tel.acceptedVectorCount} / ${tel.rawVectorCount}", color = Color.Green, fontWeight = FontWeight.Bold)
                 Text("Ratio Median: ${String.format("%.4f", tel.acceptedRatioMedian)} | MAD: ${String.format("%.4f", tel.acceptedRatioMAD)}", color = Color.Cyan)
