@@ -124,7 +124,7 @@ fun V4ExperimentScreen() {
                 imageAnalysisRef = imageAnalysis
                 
                 try {
-                                        cameraProvider.unbindAll()
+                                        
                                         val camera = cameraProvider.bindToLifecycle(
                         lifecycleOwner,
                         if (cameraProvider.hasCamera(CameraSelector.DEFAULT_BACK_CAMERA)) CameraSelector.DEFAULT_BACK_CAMERA else CameraSelector.DEFAULT_FRONT_CAMERA,
@@ -143,7 +143,7 @@ fun V4ExperimentScreen() {
             if (cameraProviderFuture.isDone) {
                 val provider = cameraProviderFuture.get()
                                 imageAnalysisRef?.clearAnalyzer()
-                                provider.unbindAll()
+                                try { imageAnalysisRef?.let { provider.unbind(it) }; previewRef?.let { provider.unbind(it) } } catch(e: Exception) {}
                 
                 
 
@@ -495,7 +495,7 @@ fun V4ResultDialog(result: V4Result, noLensFrames: List<Bitmap>, withLensFrames:
                     text = "V6 Status: ${if (tel.success) "SUCCESS" else "FAILED"} (${tel.failureReason})",
                     color = if (tel.success) Color.Green else Color.Red
                 )
-                Text("Reference Valid Cells: ${tel.referenceValidCells} | Lens Valid Cells: ${tel.lensValidCells}", color = Color.LightGray)
+                Text("Reference Assigned Cells: ${tel.referenceAssignedCells} | Lens Assigned Cells: ${tel.lensAssignedCells}", color = Color.LightGray)
                 Text("Valid Directional Vectors: ${tel.validDirectionalVectors}", color = Color.Green, fontWeight = FontWeight.Bold)
                 Text("Ratio Median: ${String.format("%.4f", tel.ratioMedian)} | Ratio Range: ${String.format("%.4f", tel.ratioRange)}", color = Color.Cyan)
                 Text("Directional Consistency: ${tel.directionalConsistency}", color = Color.LightGray)
@@ -531,8 +531,8 @@ fun V4ResultDialog(result: V4Result, noLensFrames: List<Bitmap>, withLensFrames:
                         appendLine("Timestamp: ${java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).format(java.util.Date())}")
                         appendLine("Git Commit: ${tel.gitCommit}")
                         appendLine("Success: ${tel.success} (${tel.failureReason})")
-                        appendLine("Reference Valid Cells: ${tel.referenceValidCells}")
-                        appendLine("Lens Valid Cells: ${tel.lensValidCells}")
+                        appendLine("Reference Assigned Cells: ${tel.referenceAssignedCells}")
+                        appendLine("Lens Assigned Cells: ${tel.lensAssignedCells}")
                         appendLine("Valid Directional Vectors: ${tel.validDirectionalVectors}")
                         appendLine("Ratio Median: ${tel.ratioMedian}")
                         appendLine("Ratio Range: ${tel.ratioRange}")

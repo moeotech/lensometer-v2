@@ -12,13 +12,19 @@ import kotlin.math.*
 @Config(sdk = [36])
 class V6SyntheticTest {
 
-    private fun generateGrid(rows: Int = 21, cols: Int = 21, spacing: Double = 50.0): List<Point> {
+    private fun generateGrid(rows: Int = 21, cols: Int = 21, spacingX: Double = 50.0, spacingY: Double = 50.0, angleDeg: Double = 0.0, dx: Double = 0.0, dy: Double = 0.0): List<Point> {
         val points = mutableListOf<Point>()
-        val startX = 540.0 - 10 * spacing
-        val startY = 960.0 - 10 * spacing
+        val startX = 540.0 - 10 * spacingX
+        val startY = 960.0 - 10 * spacingY
+        val rad = angleDeg * PI / 180.0
+        
         for (r in 0 until rows) {
             for (c in 0 until cols) {
-                points.add(Point(startX + c * spacing, startY + r * spacing))
+                val x = startX + c * spacingX - 540.0
+                val y = startY + r * spacingY - 960.0
+                val rx = x * cos(rad) - y * sin(rad)
+                val ry = x * sin(rad) + y * cos(rad)
+                points.add(Point(rx + 540.0 + dx, ry + 960.0 + dy))
             }
         }
         return points
@@ -27,23 +33,18 @@ class V6SyntheticTest {
     @Test
     fun testZeroGridRecovery() {
         val ref = generateGrid()
-        
         val result = V6StructuredDeflectometryAnalyzer.analyzePoints(ref, ref)
         
         assertTrue("Test failed: Should successfully analyze zero grid", result.telemetry.success)
-        assertEquals("Test failed: Reference valid cells should match expected", 441, result.telemetry.referenceValidCells)
-        assertEquals("Test failed: Lens valid cells should match expected", 441, result.telemetry.lensValidCells)
-        
-        // Zero distortion means ratio is 1.0
+        assertEquals("Test failed: Reference valid cells should match expected", 441, result.telemetry.referenceAssignedCells)
+        assertEquals("Test failed: Lens valid cells should match expected", 441, result.telemetry.lensAssignedCells)
         assertEquals(1.0, result.telemetry.ratioMedian, 0.01)
     }
     
     @Test
     fun testIsotropicDeformation() {
         val ref = generateGrid()
-        
         val center = Point(540.0, 960.0)
-        // Simulate a spherical lens where r_lens = 1.05 * r_ref
         val lens = ref.map { 
             val dx = it.x - center.x
             val dy = it.y - center.y
@@ -53,30 +54,26 @@ class V6SyntheticTest {
         val result = V6StructuredDeflectometryAnalyzer.analyzePoints(ref, lens)
         assertTrue(result.telemetry.success)
         assertEquals("Ratio median should be ~1.05", 1.05, result.telemetry.ratioMedian, 0.01)
-        
-        // Ensure ratio range is very small for isotropic
         assertTrue("Ratio range should be small", result.telemetry.ratioRange < 0.02)
     }
 
     @Test
     fun testMissingDots() {
         val ref = generateGrid().toMutableList()
-        // Remove some points from ref
         ref.removeAt(50)
         ref.removeAt(100)
         
         val result = V6StructuredDeflectometryAnalyzer.analyzePoints(ref, ref)
         
         assertTrue("Test failed: Should successfully analyze with missing dots", result.telemetry.success)
-        assertEquals("Test failed: Should have less than 441 valid cells", 439, result.telemetry.referenceValidCells)
+        assertEquals("Test failed: Should have less than 441 valid cells", 439, result.telemetry.referenceAssignedCells)
+        assertEquals(439, result.telemetry.commonGridCells)
     }
 
     @Test
     fun testAnisotropicDeformation() {
         val ref = generateGrid()
-        
         val center = Point(540.0, 960.0)
-        // Simulate astigmatic lens where X scales by 1.1 and Y scales by 1.0
         val lens = ref.map { 
             val dx = it.x - center.x
             val dy = it.y - center.y
@@ -85,8 +82,48 @@ class V6SyntheticTest {
         
         val result = V6StructuredDeflectometryAnalyzer.analyzePoints(ref, lens)
         assertTrue(result.telemetry.success)
-        
-        // Ratio range should be around 0.1 for anisotropic
         assertTrue("Ratio range should be approx 0.1", result.telemetry.ratioRange > 0.08)
+    }
+
+    @Test
+    fun testRotatedGrid0() {
+        val ref = generateGrid(angleDeg = 0.0)
+        val result = V6StructuredDeflectometryAnalyzer.analyzePoints(ref, ref)
+        assertTrue(result.telemetry.success)
+        assertEquals(441, result.telemetry.commonGridCells)
+    }
+
+    @Test
+    fun testRotatedGrid5() {
+        val ref = generateGrid(angleDeg = 5.0)
+        val result = V6StructuredDeflectometryAnalyzer.analyzePoints(ref, ref)
+        assertTrue(result.telemetry.success)
+        assertEquals(441, result.telemetry.commonGridCells)
+        assertTrue(abs(result.telemetry.estimatedGridAngleDeg - 5.0) < 1.0 || abs(result.telemetry.estimatedGridAngleDeg - 85.0) < 1.0)
+    }
+
+    @Test
+    fun testRotatedGridMinus10() {
+        val ref = generateGrid(angleDeg = -10.0)
+        val result = V6StructuredDeflectometryAnalyzer.analyzePoints(ref, ref)
+        assertTrue(result.telemetry.success)
+        assertEquals(441, result.telemetry.commonGridCells)
+    }
+
+    @Test
+    fun testTranslatedGrid() {
+        val ref = generateGrid()
+        // Lens is isotropic + shifted
+        val center = Point(540.0, 960.0)
+        val lens = ref.map { 
+            val dx = it.x - center.x
+            val dy = it.y - center.y
+            Point(center.x + dx * 1.05 + 10.5, center.y + dy * 1.05 - 8.2)
+        }
+        
+        val result = V6StructuredDeflectometryAnalyzer.analyzePoints(ref, lens)
+        assertTrue(result.telemetry.success)
+        assertEquals(441, result.telemetry.commonGridCells)
+        assertEquals(1.05, result.telemetry.ratioMedian, 0.01)
     }
 }

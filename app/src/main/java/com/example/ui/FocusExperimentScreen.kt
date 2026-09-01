@@ -163,7 +163,7 @@ fun FocusExperimentScreen() {
                         imageAnalysisRef = imageAnalysis
                     
                         try {
-                                                        cameraProvider.unbindAll()
+                                                        
                                         val camera = cameraProvider.bindToLifecycle(
                                 lifecycleOwner,
                                 if (cameraProvider.hasCamera(CameraSelector.DEFAULT_BACK_CAMERA)) CameraSelector.DEFAULT_BACK_CAMERA else CameraSelector.DEFAULT_FRONT_CAMERA,
@@ -182,7 +182,7 @@ fun FocusExperimentScreen() {
             if (cameraProviderFuture.isDone) {
                 val provider = cameraProviderFuture.get()
                                 imageAnalysisRef?.clearAnalyzer()
-                                provider.unbindAll()
+                                try { imageAnalysisRef?.let { provider.unbind(it) }; previewRef?.let { provider.unbind(it) } } catch(e: Exception) {}
                 
                 
 
