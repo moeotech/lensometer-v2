@@ -1,3 +1,4 @@
+cat << 'INNER_EOF' > app/src/main/java/com/example/analysis/v6/V6StructuredDeflectometryAnalyzer.kt
 package com.example.analysis.v6
 
 import android.graphics.Bitmap
@@ -302,3 +303,4 @@ object V6StructuredDeflectometryAnalyzer {
         )
     }
 }
+INNER_EOF

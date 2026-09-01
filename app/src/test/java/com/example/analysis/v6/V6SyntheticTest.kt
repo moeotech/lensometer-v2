@@ -1,6 +1,8 @@
 package com.example.analysis.v6
 
 import org.junit.Assert.*
+import org.junit.Before
+import org.opencv.android.OpenCVLoader
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -11,6 +13,12 @@ import kotlin.math.*
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
 class V6SyntheticTest {
+    @Before
+    fun setUp() {
+        OpenCVLoader.initDebug()
+    }
+    
+
 
     private fun generateGrid(rows: Int = 21, cols: Int = 21, spacingX: Double = 50.0, spacingY: Double = 50.0, angleDeg: Double = 0.0, dx: Double = 0.0, dy: Double = 0.0): List<Point> {
         val points = mutableListOf<Point>()

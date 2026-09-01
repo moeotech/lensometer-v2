@@ -1,0 +1,78 @@
+cat << 'INNER_EOF' > app/src/main/java/com/example/ui/V4ExperimentScreen.kt.patch
+--- app/src/main/java/com/example/ui/V4ExperimentScreen.kt
++++ app/src/main/java/com/example/ui/V4ExperimentScreen.kt
+@@ -494,20 +494,22 @@
+                 Text(
+                     text = "V6 Status: ${if (tel.success) "SUCCESS" else "FAILED"} (${tel.failureReason})",
+                     color = if (tel.success) Color.Green else Color.Red
+                 )
+-                Text("Reference Assigned Cells: ${tel.referenceAssignedCells} | Lens Assigned Cells: ${tel.lensAssignedCells}", color = Color.LightGray)
+-                Text("Valid Directional Vectors: ${tel.validDirectionalVectors}", color = Color.Green, fontWeight = FontWeight.Bold)
+-                Text("Ratio Median: ${String.format("%.4f", tel.ratioMedian)} | Ratio Range: ${String.format("%.4f", tel.ratioRange)}", color = Color.Cyan)
+-                Text("Directional Consistency: ${tel.directionalConsistency}", color = Color.LightGray)
++                Text("Inside Lens Cells: Ref=${tel.insideLensRefCells}, Lens=${tel.insideLensLensCells}, Common=${tel.insideLensCommonCells}", color = Color.LightGray)
++                Text("Accepted Vectors: ${tel.acceptedVectorCount} / ${tel.rawVectorCount}", color = Color.Green, fontWeight = FontWeight.Bold)
++                Text("Ratio Median: ${String.format("%.4f", tel.acceptedRatioMedian)} | MAD: ${String.format("%.4f", tel.acceptedRatioMAD)}", color = Color.Cyan)
++                Text("Directional Consistency: ${tel.directionalConsistency} (${tel.directionalConsistencyReason})", color = Color.LightGray)
+ 
+                 if (v6.fitResult != null) {
+                     val f = v6.fitResult!!
+                     Spacer(modifier = Modifier.height(4.dp))
+                     Text("SINUSOIDAL FITTING (RAW RATIOS):", color = Color.Yellow, fontWeight = FontWeight.Bold)
+                     Text("A0 (Mean Ratio): ${String.format("%.4f", f.a0)}", color = Color.Cyan)
+                     Text("ACos: ${String.format("%.4f", f.aCos)} | ASin: ${String.format("%.4f", f.aSin)}", color = Color.LightGray)
+-                    Text("Astigmatic Amplitude: ${String.format("%.4f", f.astigmaticAmplitude)}", color = Color.LightGray)
+-                    Text("Principal Orientation: ${String.format("%.1f°", f.principalOrientation)}", color = Color.Cyan)
++                    Text("Amplitude: ${String.format("%.4f", f.astigmaticAmplitude)} | Coverage: ${String.format("%.1f%%", f.angularCoverage)}", color = Color.LightGray)
++                    Text("RAW PRINCIPAL ORIENTATION: ${String.format("%.1f°", f.principalOrientation)}", color = Color.Cyan)
++                    Text("Fit RMS: ${String.format("%.4f", f.fitRms)} | Fit MAD: ${String.format("%.4f", f.fitMad)}", color = Color.LightGray)
+                 }
+                 if (v6.debugBitmap != null) {
+                     Spacer(modifier = Modifier.height(8.dp))
+@@ -531,10 +533,26 @@
+                         appendLine("Timestamp: ${java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).format(java.util.Date())}")
+                         appendLine("Git Commit: ${tel.gitCommit}")
+                         appendLine("Success: ${tel.success} (${tel.failureReason})")
+-                        appendLine("Reference Assigned Cells: ${tel.referenceAssignedCells}")
+-                        appendLine("Lens Assigned Cells: ${tel.lensAssignedCells}")
+-                        appendLine("Valid Directional Vectors: ${tel.validDirectionalVectors}")
+-                        appendLine("Ratio Median: ${tel.ratioMedian}")
+-                        appendLine("Ratio Range: ${tel.ratioRange}")
+-                        appendLine("Directional Consistency: ${tel.directionalConsistency}")
++                        appendLine("Global Tx: ${tel.globalTx}")
++                        appendLine("Global Ty: ${tel.globalTy}")
++                        appendLine("Global Rotation: ${tel.globalRotation}")
++                        appendLine("Global Scale: ${tel.globalScale}")
++                        appendLine("Inside Lens Ref Cells: ${tel.insideLensRefCells}")
++                        appendLine("Inside Lens Lens Cells: ${tel.insideLensLensCells}")
++                        appendLine("Inside Lens Common Cells: ${tel.insideLensCommonCells}")
++                        appendLine("Outside Lens Reg Cells: ${tel.outsideLensRegistrationCells}")
++                        appendLine("Raw Vector Count: ${tel.rawVectorCount}")
++                        appendLine("Accepted Vector Count: ${tel.acceptedVectorCount}")
++                        appendLine("Rejected Ratio Outlier: ${tel.rejectedRatioOutlier}")
++                        appendLine("Rejected Grid Mismatch: ${tel.rejectedGridMismatch}")
++                        appendLine("Rejected Boundary: ${tel.rejectedBoundary}")
++                        appendLine("Rejected Spatial Consistency: ${tel.rejectedSpatialConsistency}")
++                        appendLine("Raw Ratio Median: ${tel.rawRatioMedian}")
++                        appendLine("Accepted Ratio Median: ${tel.acceptedRatioMedian}")
++                        appendLine("Accepted Ratio MAD: ${tel.acceptedRatioMAD}")
++                        appendLine("Accepted Ratio P05: ${tel.acceptedRatioP05}")
++                        appendLine("Accepted Ratio P95: ${tel.acceptedRatioP95}")
++                        appendLine("Directional Consistency: ${tel.directionalConsistency}")
++                        appendLine("Directional Consistency Reason: ${tel.directionalConsistencyReason}")
+                         appendLine("")
+                         if (v6.fitResult != null) {
+@@ -544,7 +562,11 @@
+                             appendLine("ACos: ${f.aCos}")
+                             appendLine("ASin: ${f.aSin}")
+                             appendLine("Amplitude: ${f.astigmaticAmplitude}")
+-                            appendLine("Orientation: ${f.principalOrientation}")
++                            appendLine("RAW PRINCIPAL ORIENTATION: ${f.principalOrientation}")
++                            appendLine("Fit RMS: ${f.fitRms}")
++                            appendLine("Fit MAD: ${f.fitMad}")
++                            appendLine("Angular Coverage: ${f.angularCoverage}")
++                            appendLine("Sample Count: ${f.sampleCount}")
+                             appendLine("")
+                         }
+INNER_EOF
+patch -p0 < app/src/main/java/com/example/ui/V4ExperimentScreen.kt.patch
