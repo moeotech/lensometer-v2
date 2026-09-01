@@ -79,6 +79,35 @@ class V6SyntheticTest {
         assertTrue("Should have some inside cells", result.telemetry.insideLensCommonCells > 10)
     }
 
+
+    @Test
+    fun testRoiValidationNegativeCenter() {
+        val (rejected, reason) = V6StructuredDeflectometryAnalyzer.validateRoi(-10.0, 500.0, 100.0, 100.0, 1080, 1920)
+        assertTrue(rejected)
+        assertEquals("Center outside image", reason)
+    }
+
+    @Test
+    fun testRoiValidationCenterOutsideFrame() {
+        val (rejected, reason) = V6StructuredDeflectometryAnalyzer.validateRoi(1200.0, 500.0, 100.0, 100.0, 1080, 1920)
+        assertTrue(rejected)
+        assertEquals("Center outside image", reason)
+    }
+
+    @Test
+    fun testRoiValidationEllipseTooLarge() {
+        val (rejected, reason) = V6StructuredDeflectometryAnalyzer.validateRoi(540.0, 960.0, 1500.0, 1500.0, 1080, 1920)
+        assertTrue(rejected)
+        assertEquals("Radius too large", reason)
+    }
+
+    @Test
+    fun testRoiValidationExtremeAspectRatio() {
+        val (rejected, reason) = V6StructuredDeflectometryAnalyzer.validateRoi(540.0, 960.0, 300.0, 800.0, 1080, 1920)
+        assertTrue(rejected)
+        assertEquals("Extreme aspect ratio", reason)
+    }
+
     @Test
     fun testZeroGridRecovery() {
         val ref = generateGrid()

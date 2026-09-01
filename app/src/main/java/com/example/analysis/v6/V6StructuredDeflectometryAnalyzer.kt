@@ -19,6 +19,27 @@ data class V6Result(
 )
 
 object V6StructuredDeflectometryAnalyzer {
+
+    fun validateRoi(rawCx: Double, rawCy: Double, rawW: Double, rawH: Double, imgW: Int, imgH: Int): Pair<Boolean, String> {
+        val minDim = min(imgW, imgH)
+        val minR = min(rawW, rawH) / 2.0
+        val maxR = max(rawW, rawH) / 2.0
+        val aspect = if (minR > 0) maxR / minR else Double.MAX_VALUE
+        
+        if (rawCx < 0.0 || rawCy < 0.0 || rawCx >= imgW || rawCy >= imgH) {
+            return Pair(true, "Center outside image")
+        } else if (maxR * 1.2 > 0.48 * minDim) {
+            return Pair(true, "Radius too large")
+        } else if (minR * 0.8 < 0.1 * minDim) {
+            return Pair(true, "Radius too small")
+        } else if (aspect > 2.0) {
+            return Pair(true, "Extreme aspect ratio")
+        } else if (rawCx - maxR < -0.2 * imgW || rawCx + maxR > imgW * 1.2 || rawCy - maxR < -0.2 * imgH || rawCy + maxR > imgH * 1.2) {
+            return Pair(true, "Ellipse out of bounds")
+        }
+        return Pair(false, "")
+    }
+
     private fun detectDots(bitmap: Bitmap): List<Point> {
         val mat = Mat()
         Utils.bitmapToMat(bitmap, mat)
@@ -64,30 +85,74 @@ object V6StructuredDeflectometryAnalyzer {
         }
         
         var roiSource = "FALLBACK"
-        var roiCenterX = noLensFrames[0].width / 2.0
-        var roiCenterY = noLensFrames[0].height / 2.0
-        var roiInnerR = min(noLensFrames[0].width, noLensFrames[0].height) * 0.25
-        var roiOuterR = min(noLensFrames[0].width, noLensFrames[0].height) * 0.40
+        val imgW = noLensFrames[0].width
+        val imgH = noLensFrames[0].height
+        val minDim = min(imgW, imgH)
+        var roiCenterX = imgW / 2.0
+        var roiCenterY = imgH / 2.0
+        var roiInnerR = minDim * 0.25
+        var roiOuterR = minDim * 0.40
+
+        var autoRoiRejected = false
+        var autoRoiRejectReason = ""
+        var rawCx = 0.0
+        var rawCy = 0.0
+        var rawW = 0.0
+        var rawH = 0.0
 
         for (frame in withLensFrames) {
             val ell = com.example.ui.detectLensEllipse(frame)
             if (ell != null) {
-                roiCenterX = ell.center.x
-                roiCenterY = ell.center.y
-                val minR = min(ell.size.width, ell.size.height) / 2.0
-                val maxR = max(ell.size.width, ell.size.height) / 2.0
-                roiInnerR = minR * 0.8
-                roiOuterR = maxR * 1.2
-                roiSource = "AUTO"
+                rawCx = ell.center.x
+                rawCy = ell.center.y
+                rawW = ell.size.width
+                rawH = ell.size.height
+                
+                val minR = min(rawW, rawH) / 2.0
+                val maxR = max(rawW, rawH) / 2.0
+                val aspect = if (minR > 0) maxR / minR else Double.MAX_VALUE
+                
+                val validation = validateRoi(rawCx, rawCy, rawW, rawH, imgW, imgH)
+                autoRoiRejected = validation.first
+                autoRoiRejectReason = validation.second
+                
+                if (!autoRoiRejected) {
+                    roiCenterX = rawCx
+                    roiCenterY = rawCy
+                    roiInnerR = minR * 0.8
+                    roiOuterR = maxR * 1.2
+                    roiSource = "AUTO"
+                }
                 break
             }
         }
         
         val providedRoi = V6LensRoi(roiCenterX, roiCenterY, roiInnerR, roiOuterR)
-        return@withContext analyzePoints(refPoints, lensPoints, noLensFrames[0].width, noLensFrames[0].height, providedRoi, roiSource)
+        var result = analyzePoints(refPoints, lensPoints, imgW, imgH, providedRoi, roiSource, autoRoiRejected, autoRoiRejectReason, rawCx, rawCy, rawW, rawH)
+        
+        // 4. After ROI generation, verify it produces some cells. Fall back if not.
+        if (roiSource == "AUTO" && (result.telemetry.insideLensCommonCells == 0 || result.telemetry.outsideLensRegistrationCells == 0)) {
+            val fallbackRoi = V6LensRoi(imgW / 2.0, imgH / 2.0, minDim * 0.25, minDim * 0.40)
+            result = analyzePoints(refPoints, lensPoints, imgW, imgH, fallbackRoi, "FALLBACK", true, "Zero valid cells inside/outside", rawCx, rawCy, rawW, rawH)
+        }
+        
+        return@withContext result
     }
 
-    fun analyzePoints(refPoints: List<Point>, lensPoints: List<Point>, width: Int = 1080, height: Int = 1920, providedRoi: V6LensRoi? = null, providedRoiSource: String = "FALLBACK"): V6Result {
+    fun analyzePoints(
+        refPoints: List<Point>, 
+        lensPoints: List<Point>, 
+        width: Int = 1080, 
+        height: Int = 1920, 
+        providedRoi: V6LensRoi? = null, 
+        providedRoiSource: String = "FALLBACK",
+        autoRoiRejected: Boolean = false,
+        autoRoiRejectReason: String = "",
+        rawEllipseCenterX: Double = 0.0,
+        rawEllipseCenterY: Double = 0.0,
+        rawEllipseWidth: Double = 0.0,
+        rawEllipseHeight: Double = 0.0
+    ): V6Result {
         val refGrid = V6GridDetector.recoverZeroGrid(refPoints)
         val lensGrid = V6GridDetector.recoverLensGrid(lensPoints, refGrid)
         

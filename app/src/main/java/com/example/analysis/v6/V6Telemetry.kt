@@ -18,6 +18,14 @@ data class V6Telemetry(
     val lensRoiOuterRadius: Double = 0.0,
     val lensRoiSource: String = "FALLBACK",
 
+    val autoRoiRejected: Boolean = false,
+    val autoRoiRejectReason: String = "",
+    val rawEllipseCenterX: Double = 0.0,
+    val rawEllipseCenterY: Double = 0.0,
+    val rawEllipseWidth: Double = 0.0,
+    val rawEllipseHeight: Double = 0.0,
+
+
     
     val referenceAssignedCells: Int = 0,
     val lensAssignedCells: Int = 0,
